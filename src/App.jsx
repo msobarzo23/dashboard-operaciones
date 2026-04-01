@@ -4,29 +4,33 @@ import _ from "lodash";
 
 const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856GFyKLBBXGcgeUnkqttWGvFXbbeKDwGWoNDuBd0Tn9VJLDfRSezlD8zHi8Q_E6RlciYlT/pub?gid=0&single=true&output=csv";
 
-// ─── Zone Classification ───
-const ZONE_MAP = {
-  "NORTE": ["IQUIQUE","POZO ALMONTE","ALTO HOSPICIO","COLLAHUASI","QUEBRADA BLANCA","PICA","PUERTO PATACHE","PUERTO IQUIQUE","NUDO URIBE","ARICA","TALABRE"],
-  "ANTOFAGASTA": ["MEJILLONES","LA NEGRA","ANTOFAGASTA","CALAMA","MINERA ESCONDIDA","MINERA ESCONDIDA LAGUNA SECA","MINERA ESCONDIDA LOS COLORADOS","MINERA ESCONDIDA OGP1","MINERA ESCONDIDA PUERTO COLOSO","SPENCE","EL ABRA","CENTINELA","SIERRA GORDA","LOMAS BAYAS","MANTOS BLANCOS","MANTOS DE LA LUNA","RADOMIRO TOMIC","MINISTRO HALES","EL TESORO","MINERA ESPERANZA","MINERA ENCUENTRO","MINERA FRANKE","MINERA MICHILLA","MINA GABY","ANTUCOYA","MINERA ANTUCOYA","CERRO DOMINADOR","PUERTO ANGAMOS","AGUA DE MAR","LA PORTADA","MARIA ELENA","PEDRO DE VALDIVIA","EL TOCO","RIO LOA","TOCOPILLA","PAMPA BLANCA","SALAR DE ATACAMA","SALAR DEL CARMEN","ELENITA","NUEVA VICTORIA","AGUAS VERDES","DOMEYKO","EL PEÑON","ZALDIVAR","MINA OESTE","BARRIAL SECO","CERRO NEGRO","COYASUR"],
-  "ATACAMA": ["COPIAPO","PAIPOTE","VALLENAR","COQUIMBO","PUNTA TEATINOS","SALADILLO","LOS COLORADOS","CANDELARIA","MINA LA COIPA","MANTOS VERDES","MINERA ARQUEROS","OJOS DEL SALADO","PUNTA DE COBRE","PUCOBRE","EL SALVADOR","CERRO NEGRO","FENIX GOLD","SALARES NORTE","MINERA GUANACO","GARITA CARRIZALILLO","PORTEZUELO","MINA TERRAEX PAIPOTE","MINERA PLEITO","ATACAMA KOZAN","MANTOVERDE","MAITENCILLO","ANDACOLLO","LA SERENA","OVALLE","ROMERAL","MINERA EL CRISTO","LAS BARRANCAS"],
-  "CENTRAL": ["SANTIAGO","QUILICURA","LAMPA","BUIN","RANCAGUA","SAN ANTONIO","SAN BERNARDO","PEÑAFLOR","PADRE HURTADO","PELDEHUE","ESTACION CENTRAL","AEROPUERTO SANTIAGO","LOS ANDES","SAN FELIPE","VIÑA DEL MAR","VALPARAISO","CASABLANCA","LIMACHE","RENGO","REQUINOA","TALAGANTE","COLINA","PROVIDENCIA","FLORIDA","NOGALES","QUILLOTA","SALAMANCA","LOS BRONCES","ANDINA","EL TENIENTE","EL TENIENTE (RAJO SUR)","EL SOLDADO","MINERA LOS PELAMBRES","MINERA VALLE CENTRAL","ALHUE","MINA EL ESPINO","SAN JAVIER","SANTA FE"]
+// ─── Clasificación por Sucursal ───
+const SUCURSAL_MAP = {
+  "POZO ALMONTE": ["POZO ALMONTE","IQUIQUE","ALTO HOSPICIO","COLLAHUASI","QUEBRADA BLANCA","PICA","ARICA","PUERTO PATACHE","PUERTO IQUIQUE","NUDO URIBE","TALABRE"],
+  "MEJILLONES": ["MEJILLONES"],
+  "ANTOFAGASTA": ["LA NEGRA","ANTOFAGASTA","CALAMA","MINERA ESCONDIDA","MINERA ESCONDIDA LAGUNA SECA","MINERA ESCONDIDA LOS COLORADOS","MINERA ESCONDIDA OGP1","MINERA ESCONDIDA PUERTO COLOSO","SPENCE","EL ABRA","CENTINELA","SIERRA GORDA","LOMAS BAYAS","MANTOS BLANCOS","MANTOS DE LA LUNA","RADOMIRO TOMIC","MINISTRO HALES","EL TESORO","MINERA ESPERANZA","MINERA ENCUENTRO","MINERA FRANKE","MINERA MICHILLA","MINA GABY","ANTUCOYA","MINERA ANTUCOYA","CERRO DOMINADOR","PUERTO ANGAMOS","AGUA DE MAR","LA PORTADA","MARIA ELENA","PEDRO DE VALDIVIA","EL TOCO","RIO LOA","TOCOPILLA","PAMPA BLANCA","SALAR DE ATACAMA","SALAR DEL CARMEN","ELENITA","NUEVA VICTORIA","AGUAS VERDES","DOMEYKO","EL PEÑON","ZALDIVAR","MINA OESTE","BARRIAL SECO","CERRO NEGRO","COYASUR","EL SALVADOR","EHM"],
+  "COPIAPO": ["COPIAPO","PAIPOTE","VALLENAR","CANDELARIA","MINA LA COIPA","MANTOS VERDES","MINERA ARQUEROS","OJOS DEL SALADO","PUNTA DE COBRE","PUCOBRE","FENIX GOLD","SALARES NORTE","MINERA GUANACO","GARITA CARRIZALILLO","PORTEZUELO","MINA TERRAEX PAIPOTE","MINERA PLEITO","ATACAMA KOZAN","MANTOVERDE","MAITENCILLO","MINERA EL CRISTO","LAS BARRANCAS","CASERONES"],
+  "COQUIMBO": ["COQUIMBO","PUNTA TEATINOS","SALADILLO","LOS COLORADOS","LA SERENA","OVALLE","ANDACOLLO","ROMERAL","MINERA LOS PELAMBRES","SALAMANCA"],
+  "SANTIAGO": ["SANTIAGO","QUILICURA","LAMPA","BUIN","RANCAGUA","SAN ANTONIO","SAN BERNARDO","PEÑAFLOR","PADRE HURTADO","PELDEHUE","ESTACION CENTRAL","AEROPUERTO SANTIAGO","AEROPUERTO ANTOFAGASTA","LOS ANDES","SAN FELIPE","VIÑA DEL MAR","VALPARAISO","CASABLANCA","LIMACHE","RENGO","REQUINOA","TALAGANTE","COLINA","PROVIDENCIA","FLORIDA","NOGALES","QUILLOTA","LOS BRONCES","ANDINA","EL TENIENTE","EL TENIENTE (RAJO SUR)","EL SOLDADO","MINERA VALLE CENTRAL","ALHUE","MINA EL ESPINO","SAN JAVIER","SANTA FE"]
 };
 
-const ZONE_COLORS = {
-  "NORTE": { bg: "#1a2744", text: "#5b9cf5", accent: "#3b7de0" },
+const SUCURSAL_COLORS = {
+  "POZO ALMONTE": { bg: "#1a2744", text: "#5b9cf5", accent: "#3b7de0" },
+  "MEJILLONES": { bg: "#1a2a3a", text: "#4ecdc4", accent: "#36a89e" },
   "ANTOFAGASTA": { bg: "#2a1f0e", text: "#f5a623", accent: "#d4891a" },
-  "ATACAMA": { bg: "#1a2a1a", text: "#6fcf6f", accent: "#4a9f4a" },
-  "CENTRAL": { bg: "#2a1a2a", text: "#cf6fcf", accent: "#9f4a9f" },
-  "OTRO": { bg: "#1a1a1a", text: "#999", accent: "#666" }
+  "COPIAPO": { bg: "#1a2a1a", text: "#6fcf6f", accent: "#4a9f4a" },
+  "COQUIMBO": { bg: "#2a1a2a", text: "#cf6fcf", accent: "#9f4a9f" },
+  "SANTIAGO": { bg: "#1f1a2a", text: "#8b9cf5", accent: "#6b7ce0" },
+  "OTROS": { bg: "#1a1a1a", text: "#999", accent: "#666" }
 };
 
-function getZone(location) {
-  if (!location) return "OTRO";
+function getSucursal(location) {
+  if (!location) return "OTROS";
   const loc = location.toUpperCase().trim();
-  for (const [zone, locs] of Object.entries(ZONE_MAP)) {
-    if (locs.includes(loc)) return zone;
+  for (const [suc, locs] of Object.entries(SUCURSAL_MAP)) {
+    if (locs.includes(loc)) return suc;
   }
-  return "OTRO";
+  return "OTROS";
 }
 
 function parseDate(str) {
@@ -98,9 +102,9 @@ function StatCard({ value, label, icon, color }) {
   );
 }
 
-function ZoneBadge({ zone }) {
-  const z = ZONE_COLORS[zone] || ZONE_COLORS["OTRO"];
-  return <span style={{ ...baseStyles.pill, background: z.bg, color: z.text, border:`1px solid ${z.accent}44` }}>{zone}</span>;
+function SucursalBadge({ sucursal }) {
+  const z = SUCURSAL_COLORS[sucursal] || SUCURSAL_COLORS["OTROS"];
+  return <span style={{ ...baseStyles.pill, background: z.bg, color: z.text, border:`1px solid ${z.accent}44` }}>{sucursal}</span>;
 }
 
 function Pagination({ page, totalPages, onPageChange }) {
@@ -153,7 +157,7 @@ function BuscadorEquipos({ data, tractoIndex, ramplaIndex, today }) {
       {results && results.map((r, i) => {
         const last = r.tramos[0];
         const inactive = daysBetween(last._date, today);
-        const zone = getZone(last.Destino);
+        const sucursal = getSucursal(last.Destino);
         return (
           <div key={i} style={{ ...baseStyles.card, borderLeft:`3px solid ${r.type==="TRACTO"?theme.info:theme.accent}` }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px", flexWrap:"wrap", gap:"8px" }}>
@@ -170,7 +174,7 @@ function BuscadorEquipos({ data, tractoIndex, ramplaIndex, today }) {
             </div>
             <div style={{ background:theme.surface2, borderRadius:"8px", padding:"12px", marginBottom:"12px", display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:"8px" }}>
               <div><span style={{ color:theme.textMuted, fontSize:"10px" }}>ÚLTIMO VIAJE</span><br/><strong>{last.Origen} → {last.Destino}</strong></div>
-              <div><span style={{ color:theme.textMuted, fontSize:"10px" }}>ZONA DESTINO</span><br/><ZoneBadge zone={zone}/></div>
+              <div><span style={{ color:theme.textMuted, fontSize:"10px" }}>SUCURSAL DESTINO</span><br/><SucursalBadge sucursal={sucursal}/></div>
               <div><span style={{ color:theme.textMuted, fontSize:"10px" }}>{r.type==="TRACTO"?"RAMPLA":"TRACTO"}</span><br/><strong>{r.type==="TRACTO"?last.Rampla:last.Tracto}</strong></div>
               <div><span style={{ color:theme.textMuted, fontSize:"10px" }}>CLIENTE</span><br/>{last.Cliente}</div>
               <div><span style={{ color:theme.textMuted, fontSize:"10px" }}>CARGA</span><br/>{last.Carga}</div>
@@ -212,7 +216,7 @@ function EstadoFlota({ data, tractoIndex, ramplaIndex, today }) {
   const stats = useMemo(() => {
     const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - days);
     let activeTractos = 0, activeRamplas = 0, totalKm = 0, totalTrips = 0;
-    const zoneCount = {};
+    const sucursalCount = {};
     const tractoKm = {};
 
     for (const [key, tramos] of tractoIndex.entries()) {
@@ -228,8 +232,8 @@ function EstadoFlota({ data, tractoIndex, ramplaIndex, today }) {
     for (const [key, tramos] of ramplaIndex.entries()) {
       if (tramos.some(t => t._date >= cutoff)) activeRamplas++;
       const last = tramos[0];
-      const z = getZone(last.Destino);
-      zoneCount[z] = (zoneCount[z]||0) + 1;
+      const z = getSucursal(last.Destino);
+      sucursalCount[z] = (sucursalCount[z]||0) + 1;
     }
 
     const topTractos = Object.entries(tractoKm).sort((a,b) => b[1]-a[1]).slice(0,10);
@@ -241,7 +245,7 @@ function EstadoFlota({ data, tractoIndex, ramplaIndex, today }) {
     }
     topRamplas.sort((a,b) => b[1]-a[1]);
 
-    return { activeTractos, activeRamplas, totalKm, totalTrips, zoneCount, topTractos, topRamplas: topRamplas.slice(0,10), totalTractos: tractoIndex.size, totalRamplas: ramplaIndex.size };
+    return { activeTractos, activeRamplas, totalKm, totalTrips, sucursalCount, topTractos, topRamplas: topRamplas.slice(0,10), totalTractos: tractoIndex.size, totalRamplas: ramplaIndex.size };
   }, [data, tractoIndex, ramplaIndex, today, days]);
 
   return (
@@ -263,14 +267,14 @@ function EstadoFlota({ data, tractoIndex, ramplaIndex, today }) {
 
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"16px", marginTop:"16px" }}>
         <div style={baseStyles.card}>
-          <div style={baseStyles.cardTitle}>🗺️ Distribución de Ramplas por Zona (última ubicación)</div>
-          {Object.entries(stats.zoneCount).sort((a,b)=>b[1]-a[1]).map(([z,c]) => {
+          <div style={baseStyles.cardTitle}>🗺️ Distribución de Ramplas por Sucursal (última ubicación)</div>
+          {Object.entries(stats.sucursalCount).sort((a,b)=>b[1]-a[1]).map(([z,c]) => {
             const pct = (c / stats.totalRamplas * 100).toFixed(1);
-            const zc = ZONE_COLORS[z] || ZONE_COLORS["OTRO"];
+            const zc = SUCURSAL_COLORS[z] || SUCURSAL_COLORS["OTROS"];
             return (
               <div key={z} style={{ marginBottom:"8px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"3px" }}>
-                  <ZoneBadge zone={z}/><span style={{ fontSize:"12px", color:theme.textMuted }}>{c} equipos ({pct}%)</span>
+                  <SucursalBadge sucursal={z}/><span style={{ fontSize:"12px", color:theme.textMuted }}>{c} equipos ({pct}%)</span>
                 </div>
                 <div style={{ height:"6px", background:theme.surface2, borderRadius:"3px", overflow:"hidden" }}>
                   <div style={{ height:"100%", width:`${pct}%`, background:zc.accent, borderRadius:"3px", transition:"width 0.5s" }}/>
@@ -322,16 +326,16 @@ function EquiposInactivos({ tractoIndex, ramplaIndex, today }) {
       const last = tramos[0];
       const d = daysBetween(last._date, today);
       if (d >= threshold) {
-        results.push({ patente:key, days:d, lastDate:last.Fecha, lastOrigen:last.Origen, lastDestino:last.Destino, lastCliente:last.Cliente, lastCarga:last.Carga, zone:getZone(last.Destino), pareado:type==="tracto"?last.Rampla:last.Tracto });
+        results.push({ patente:key, days:d, lastDate:last.Fecha, lastOrigen:last.Origen, lastDestino:last.Destino, lastCliente:last.Cliente, lastCarga:last.Carga, sucursal:getSucursal(last.Destino), pareado:type==="tracto"?last.Rampla:last.Tracto });
       }
     }
     results.sort((a,b) => b.days - a.days);
     return results;
   }, [tractoIndex, ramplaIndex, today, threshold, type]);
 
-  const byZone = useMemo(() => {
+  const bySucursal = useMemo(() => {
     const m = {};
-    inactive.forEach(r => { m[r.zone] = (m[r.zone]||0)+1; });
+    inactive.forEach(r => { m[r.sucursal] = (m[r.sucursal]||0)+1; });
     return Object.entries(m).sort((a,b)=>b[1]-a[1]);
   }, [inactive]);
 
@@ -353,8 +357,8 @@ function EquiposInactivos({ tractoIndex, ramplaIndex, today }) {
 
       <div style={baseStyles.row}>
         <StatCard icon="🔴" value={inactive.length} label={`${type==="tracto"?"Tractos":"Ramplas"} inactivos +${threshold}d`} color={theme.danger}/>
-        {byZone.slice(0,3).map(([z,c]) => (
-          <StatCard key={z} icon={<ZoneBadge zone={z}/>} value={c} label={`En ${z}`} color={ZONE_COLORS[z]?.accent||"#666"}/>
+        {bySucursal.slice(0,3).map(([z,c]) => (
+          <StatCard key={z} icon={<SucursalBadge sucursal={z}/>} value={c} label={`En ${z}`} color={SUCURSAL_COLORS[z]?.accent||"#666"}/>
         ))}
       </div>
 
@@ -363,7 +367,7 @@ function EquiposInactivos({ tractoIndex, ramplaIndex, today }) {
           <table style={baseStyles.table}>
             <thead><tr>
               <th style={baseStyles.th}>Patente</th><th style={baseStyles.th}>Días Inactivo</th><th style={baseStyles.th}>Último Mov.</th>
-              <th style={baseStyles.th}>Último Destino</th><th style={baseStyles.th}>Zona</th><th style={baseStyles.th}>Pareado</th>
+              <th style={baseStyles.th}>Último Destino</th><th style={baseStyles.th}>Sucursal</th><th style={baseStyles.th}>Pareado</th>
               <th style={baseStyles.th}>Cliente</th><th style={baseStyles.th}>Carga</th>
             </tr></thead>
             <tbody>{inactive.slice(0,100).map((r,i) => (
@@ -372,7 +376,7 @@ function EquiposInactivos({ tractoIndex, ramplaIndex, today }) {
                 <td style={{ ...baseStyles.td, color: r.days>90?theme.danger:r.days>30?theme.accent:theme.text, fontWeight:600 }}>{r.days}d</td>
                 <td style={baseStyles.td}>{r.lastDate}</td>
                 <td style={baseStyles.td}>{r.lastDestino}</td>
-                <td style={baseStyles.td}><ZoneBadge zone={r.zone}/></td>
+                <td style={baseStyles.td}><SucursalBadge sucursal={r.sucursal}/></td>
                 <td style={baseStyles.td}>{r.pareado}</td>
                 <td style={baseStyles.td}>{r.lastCliente}</td>
                 <td style={baseStyles.td}>{r.lastCarga}</td>
@@ -492,7 +496,7 @@ function StatsRuta({ data, today }) {
     });
     return Object.values(byRoute)
       .filter(r => r.count >= minTrips)
-      .map(r => ({ ...r, avgKm: Math.round(r.km/r.count), clientes:r.clientes.size, topCarga: Object.entries(r.cargas).sort((a,b)=>b[1]-a[1])[0]?.[0]||"-", zonaOrigen:getZone(r.origen), zonaDestino:getZone(r.destino) }))
+      .map(r => ({ ...r, avgKm: Math.round(r.km/r.count), clientes:r.clientes.size, topCarga: Object.entries(r.cargas).sort((a,b)=>b[1]-a[1])[0]?.[0]||"-", sucOrigen:getSucursal(r.origen), sucDestino:getSucursal(r.destino) }))
       .sort((a,b) => b.count - a.count);
   }, [data, today, months, minTrips]);
 
@@ -515,7 +519,7 @@ function StatsRuta({ data, today }) {
         <div style={baseStyles.scrollTable}>
           <table style={baseStyles.table}>
             <thead><tr>
-              <th style={baseStyles.th}>#</th><th style={baseStyles.th}>Ruta</th><th style={baseStyles.th}>Zona O→D</th>
+              <th style={baseStyles.th}>#</th><th style={baseStyles.th}>Ruta</th><th style={baseStyles.th}>Sucursal O→D</th>
               <th style={baseStyles.th}>Viajes</th><th style={baseStyles.th}>KM Total</th><th style={baseStyles.th}>KM Prom.</th>
               <th style={baseStyles.th}>Clientes</th><th style={baseStyles.th}>Carga Ppal.</th>
             </tr></thead>
@@ -523,7 +527,7 @@ function StatsRuta({ data, today }) {
               <tr key={r.ruta} style={{ background:i%2===0?"transparent":theme.surface2 }}>
                 <td style={baseStyles.td}>{i+1}</td>
                 <td style={{ ...baseStyles.td, fontWeight:600 }}>{r.ruta}</td>
-                <td style={baseStyles.td}><ZoneBadge zone={r.zonaOrigen}/> → <ZoneBadge zone={r.zonaDestino}/></td>
+                <td style={baseStyles.td}><SucursalBadge sucursal={r.sucOrigen}/> → <SucursalBadge sucursal={r.sucDestino}/></td>
                 <td style={{ ...baseStyles.td, fontWeight:600, color:theme.accent }}>{r.count}</td>
                 <td style={baseStyles.td}>{r.km.toLocaleString("es-CL")}</td>
                 <td style={baseStyles.td}>{r.avgKm.toLocaleString("es-CL")}</td>
