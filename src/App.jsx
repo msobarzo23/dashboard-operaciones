@@ -688,9 +688,9 @@ export default function App() {
             rows = rows.map(r => ({ ...r, _date: parseDate(r.Fecha) })).filter(r => r._date);
             rows.sort((a, b) => b._date - a._date || (b.Expedicion||"").localeCompare(a.Expedicion||""));
 
-            const fechas = rows.map(r => r._date).filter(Boolean);
-            const minDate = fechas.length ? new Date(Math.min(...fechas)) : null;
-            const maxDate = fechas.length ? new Date(Math.max(...fechas)) : null;
+            // rows ya están ordenados desc, así que el primero es el más reciente y el último el más antiguo
+            const maxDate = rows.length ? rows[0]._date : null;
+            const minDate = rows.length ? rows[rows.length - 1]._date : null;
 
             setDataInfo({
               total: rows.length,
