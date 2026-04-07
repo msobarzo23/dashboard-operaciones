@@ -5,6 +5,9 @@ const CSV_VIAJES = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856G
 const CSV_FLOTA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856GFyKLBBXGcgeUnkqttWGvFXbbeKDwGWoNDuBd0Tn9VJLDfRSezlD8zHi8Q_E6RlciYlT/pub?gid=923646374&single=true&output=csv";
 const CSV_ULTIMOS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856GFyKLBBXGcgeUnkqttWGvFXbbeKDwGWoNDuBd0Tn9VJLDfRSezlD8zHi8Q_E6RlciYlT/pub?gid=1827964132&single=true&output=csv";
 
+// Constante para identificar viajes sin solicitud
+const SIN_SOLICITUD = "-Viaje sin solicitud -";
+
 // ─── Sucursales ───
 const SUCURSAL_MAP = {
   "POZO ALMONTE": ["POZO ALMONTE","IQUIQUE","ALTO HOSPICIO","COLLAHUASI","QUEBRADA BLANCA","PICA","ARICA","PUERTO PATACHE","PUERTO IQUIQUE","NUDO URIBE","TALABRE"],
@@ -50,11 +53,6 @@ function formatDate(d){if(!d)return "-";return String(d.getDate()).padStart(2,"0
 function daysBetween(d1,d2){return Math.floor((d2-d1)/86400000);}
 
 // ─── ESTADO EQUIPO — lógica centralizada ───
-// ACTIVO: tuvo viaje en los últimos 30 días
-// INACTIVO: último viaje hace 31-90 días
-// PARADO: último viaje hace más de 90 días
-// SIN VIAJES REGISTRADOS: no aparece en ningún historial (ni CSV viajes ni ultimos_viajes)
-// SIN VIAJES EN SISTEMA: aparece en ultimos_viajes pero no en CSV viajes (historial anterior a ene-2024)
 function getEstadoEquipo(daysInactive) {
   if (daysInactive === null || daysInactive === undefined) return "SIN VIAJES";
   if (daysInactive <= 30) return "ACTIVO";
@@ -197,6 +195,8 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
     {results&&results.length===0&&<div style={{...card,textAlign:"center",color:T.txM}}>Sin resultados para "{q}"</div>}
     {results&&results.map((r,i)=>{
       const last=r.tramos[0];const d=daysBetween(last._date,today);const suc=getSucursal(last.Destino);const fi=flota.get(r.pat);
+      // Indicador si el último movimiento es un viaje sin solicitud
+      const esSinSolicitud = last.Cliente === SIN_SOLICITUD;
       return(<div key={i} style={{...card,borderLeft:`4px solid ${r.t==="TRACTO"?T.blu:T.ac}`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"12px",flexWrap:"wrap",gap:"8px"}}>
           <div>
@@ -210,10 +210,17 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
           </div>
         </div>
         <div style={{background:T.sf2,borderRadius:"8px",padding:"12px",marginBottom:"12px",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:"10px",border:`1px solid ${T.bd}`}}>
-          <div><span style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>ÚLTIMO VIAJE</span><br/><strong style={{color:T.tx}}>{last.Origen} → {last.Destino}</strong></div>
+          <div>
+            <span style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>ÚLTIMO VIAJE</span><br/>
+            <strong style={{color:T.tx}}>{last.Origen} → {last.Destino}</strong>
+            {esSinSolicitud&&<span style={{display:"inline-block",marginLeft:"6px",padding:"1px 6px",borderRadius:"4px",fontSize:"10px",background:`${T.txM}22`,color:T.txM,border:`1px solid ${T.txM}44`}}>Remonta/Vacío</span>}
+          </div>
           <div><span style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>SUCURSAL</span><br/><SucBadge s={suc} T={T}/></div>
           <div><span style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>{r.t==="TRACTO"?"RAMPLA":"TRACTO"}</span><br/><strong style={{color:T.tx}}>{r.t==="TRACTO"?last.Rampla:last.Tracto}</strong></div>
-          <div><span style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>CLIENTE</span><br/><span style={{color:T.tx}}>{last.Cliente}</span></div>
+          <div>
+            <span style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>CLIENTE</span><br/>
+            <span style={{color:esSinSolicitud?T.txM:T.tx}}>{esSinSolicitud?"—":last.Cliente}</span>
+          </div>
           <div><span style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>CARGA</span><br/><span style={{color:T.tx}}>{last.Carga}</span></div>
           <div><span style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>KM</span><br/><span style={{color:T.tx}}>{Number(last.Kilometro||0).toLocaleString("es-CL")}</span></div>
           {fi&&<div><span style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>TIPO EQUIPO</span><br/><span style={{color:T.tx}}>{fi.tipoequipo}</span></div>}
@@ -227,14 +234,18 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
                 <th style={th}>{r.t==="TRACTO"?"Rampla":"Tracto"}</th>
                 <th style={th}>Cliente</th><th style={th}>Carga</th><th style={th}>KM</th>
               </tr></thead>
-              <tbody>{r.tramos.slice(0,15).map((t,j)=>(
-                <tr key={j} style={{background:j%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
-                  <td style={td}>{t.Fecha}</td><td style={td}>{t.Origen}</td><td style={td}>{t.Destino}</td>
-                  <td style={td}>{r.t==="TRACTO"?t.Rampla:t.Tracto}</td>
-                  <td style={td}>{t.Cliente}</td><td style={td}>{t.Carga}</td>
-                  <td style={td}>{Number(t.Kilometro||0).toLocaleString("es-CL")}</td>
-                </tr>
-              ))}</tbody>
+              <tbody>{r.tramos.slice(0,15).map((t,j)=>{
+                const sinSol = t.Cliente === SIN_SOLICITUD;
+                return(
+                  <tr key={j} style={{background:j%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
+                    <td style={td}>{t.Fecha}</td><td style={td}>{t.Origen}</td><td style={td}>{t.Destino}</td>
+                    <td style={td}>{r.t==="TRACTO"?t.Rampla:t.Tracto}</td>
+                    <td style={{...td,color:sinSol?T.txM:T.tx,fontStyle:sinSol?"italic":"normal"}}>{sinSol?"Remonta/Vacío":t.Cliente}</td>
+                    <td style={td}>{t.Carga}</td>
+                    <td style={td}>{Number(t.Kilometro||0).toLocaleString("es-CL")}</td>
+                  </tr>
+                );
+              })}</tbody>
             </table>
           </div>
         </details>
@@ -244,11 +255,6 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
 }
 
 // ═══ VIEW 2: ESTADO DE FLOTA ═══
-// CORRECCIÓN UTILIZACIÓN:
-// - Denominador: solo equipos del catálogo (flota) con categoría TRACTOCAMION/EQUIPO
-// - Numerador: de ese subconjunto, cuántos tuvieron al menos un viaje en el período
-// - Equipos sin viajes nunca (SIN VIAJES) se excluyen del numerador pero siguen en denominador
-// - Si un equipo tiene viajes SOLO en ultimos_viajes (pre-2024), usa esa última fecha
 function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const[days,setDays]=useState(30);
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
@@ -257,10 +263,11 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const th={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx};
 
+  // NOTA: data ya incluye viajes sin solicitud, útil para KM y último destino
+  // Para estadísticas de utilización usamos TODOS los viajes (incluyendo remonta/vacío)
   const stats=useMemo(()=>{
     const cutoff=new Date(today);cutoff.setDate(cutoff.getDate()-days);
 
-    // Contar flota por categoría (denominadores correctos)
     let fT=0,fE=0,fO=0;
     const flotaTractos=new Set();
     const flotaEquipos=new Set();
@@ -271,41 +278,31 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       else fO++;
     }
 
-    // Numeradores: cuántos de ESOS equipos (del catálogo) tuvieron viaje en el período
-    // Usando historial CSV viajes O ultimos_viajes
     let aT=0,aE=0;
     let totalKm=0,totalTrips=0;
     const sucCount={};
 
-    // Para cada tracto en catálogo, buscar su última fecha
     for(const pat of flotaTractos){
       const tr=tractoIdx.get(pat);
-      let lastDate=null;
       if(tr&&tr.length>0){
-        // tiene historial CSV
         const recent=tr.filter(t=>t._date>=cutoff);
         if(recent.length>0){
           aT++;
-          totalKm+=recent.reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
-          totalTrips+=recent.length;
+          // KM solo de viajes con solicitud real
+          totalKm+=recent.filter(t=>t.Cliente!==SIN_SOLICITUD).reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
+          totalTrips+=recent.filter(t=>t.Cliente!==SIN_SOLICITUD).length;
         }
-        lastDate=tr[0]._date;
       } else {
-        // sin historial CSV, revisar ultimos_viajes
         const u=ultimosMap.get(pat);
         if(u&&u._date>=cutoff){aT++;}
-        if(u)lastDate=u._date;
       }
     }
 
-    // Para cada equipo/rampla en catálogo
     for(const pat of flotaEquipos){
       const tr=ramplaIdx.get(pat);
-      let lastDate=null;
       if(tr&&tr.length>0){
         const recent=tr.filter(t=>t._date>=cutoff);
         if(recent.length>0)aE++;
-        lastDate=tr[0]._date;
         const last=tr[0];
         const sc=getSucursal(last.Destino);
         sucCount[sc]=(sucCount[sc]||0)+1;
@@ -313,18 +310,16 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
         const u=ultimosMap.get(pat);
         if(u&&u._date>=cutoff)aE++;
         if(u){
-          lastDate=u._date;
           const sc=getSucursal(u.Destino||"");
           sucCount[sc]=(sucCount[sc]||0)+1;
         }
       }
     }
 
-    // Km totales del período (de CSV viajes, todos los tractos con viaje en período)
+    // KM totales del período (solo viajes con solicitud real)
     for(const[,tr]of tractoIdx.entries()){
-      const recent=tr.filter(t=>t._date>=cutoff);
+      const recent=tr.filter(t=>t._date>=cutoff&&t.Cliente!==SIN_SOLICITUD);
       if(!flotaTractos.has([...tractoIdx.entries()].find(([k,v])=>v===tr)?.[0])){
-        // tracto con viajes pero no en catálogo — sumar km igualmente
         totalKm+=recent.reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
         totalTrips+=recent.length;
       }
@@ -332,7 +327,7 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
 
     const tKm=[];
     for(const[k,tr]of tractoIdx.entries()){
-      const km=tr.filter(t=>t._date>=cutoff).reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
+      const km=tr.filter(t=>t._date>=cutoff&&t.Cliente!==SIN_SOLICITUD).reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
       if(km>0)tKm.push([k,km]);
     }
     tKm.sort((a,b)=>b[1]-a[1]);
@@ -359,7 +354,7 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
     <div style={card}>
       <div style={{fontSize:"14px",fontWeight:600,marginBottom:"4px",color:T.tx}}>📈 Utilización de Flota (últimos {days} días)</div>
       <div style={{fontSize:"11px",color:T.txM,marginBottom:"16px"}}>
-        Base: equipos registrados en catálogo de flota · La barra muestra hasta 100% · El % real puede superar 100% si hay subcontratos o equipos no catalogados
+        Base: equipos registrados en catálogo de flota · KM y tramos excluyen viajes de remonta/vacío
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"24px"}}>
         <div>
@@ -429,7 +424,7 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   </div>);
 }
 
-// ═══ PDF PRINT HELPER — formato simple ═══
+// ═══ PDF PRINT HELPER ═══
 function printReporte(rows, tipo, filtroEstado, filtroSuc, today) {
   const fecha = formatDate(today);
   const tipoLabel = tipo === "tracto" ? "Tractocamiones" : "Ramplas / Equipos";
@@ -440,11 +435,12 @@ function printReporte(rows, tipo, filtroEstado, filtroSuc, today) {
 
   const filas = rows.map((r, i) => {
     const ec = EC[r.estado] || "#64748b";
+    const esSinSol = r.lastRecord?.Cliente === SIN_SOLICITUD;
     return `<tr style="background:${i%2===0?"#fff":"#f8fafc"}">
       <td>${r.pat}</td>
       <td style="color:${ec};font-weight:700">${r.days !== null ? r.days + "d" : "—"}</td>
       <td>${r.lastRecord?.Fecha || "—"}</td>
-      <td>${r.lastRecord?.Destino || "—"}</td>
+      <td>${r.lastRecord?.Destino || "—"}${esSinSol?' <span style="font-size:9px;color:#94a3b8">(remonta)</span>':''}</td>
       <td>${r.suc}</td>
       <td><span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:${ec}18;color:${ec};border:1px solid ${ec}44">${r.estado}</span></td>
       <td>${r.fi?.tipoequipo || "—"}</td>
@@ -508,7 +504,6 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const[tipo,setTipo]=useState("rampla");
   const[filtroEstado,setFiltroEstado]=useState("todos");
   const[filtroSuc,setFiltroSuc]=useState("todas");
-  // soloDocumentacion = true por defecto: mostrar SOLO equipos del catálogo (hoja Flota)
   const[soloDoc,setSoloDoc]=useState(true);
   const[pg,setPg]=useState(1);
   const PP=100;
@@ -519,12 +514,10 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
   const badge=(c)=>({display:"inline-block",padding:"2px 8px",borderRadius:"4px",fontSize:"11px",fontWeight:600,background:`${c}22`,color:c,border:`1px solid ${c}44`});
 
-  // Construir lista: primero siempre desde catálogo (flota), luego opcionalmente los sin catálogo
   const allEquipos = useMemo(()=>{
     const idx = tipo==="tracto" ? tractoIdx : ramplaIdx;
     const res = [];
 
-    // ─ Equipos EN catálogo ─
     for(const[pat,fi] of flota.entries()){
       const cat = getCategoria(fi.tipoequipo);
       if(tipo==="tracto" && cat!=="TRACTOCAMION") continue;
@@ -539,10 +532,10 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       }
       const days=lastDate?daysBetween(lastDate,today):null;
       const estado=getEstadoEquipo(days);
-      res.push({pat,days,lastRecord,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS",fi,estado,enCatalogo:true,"lastRecord.Fecha":lastRecord?.Fecha||"","fi.tipoequipo":fi.tipoequipo||""});
+      const esSinSol = lastRecord?.Cliente === SIN_SOLICITUD;
+      res.push({pat,days,lastRecord,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS",fi,estado,enCatalogo:true,"lastRecord.Fecha":lastRecord?.Fecha||"","fi.tipoequipo":fi.tipoequipo||"",esSinSol});
     }
 
-    // ─ Equipos FUERA de catálogo (solo si soloDoc=false) ─
     if(!soloDoc){
       for(const[pat,tr] of idx.entries()){
         if(flota.has(pat)) continue;
@@ -550,13 +543,13 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
         const days=daysBetween(lastDate,today);
         const last=tr[0];
         const estado=getEstadoEquipo(days);
-        res.push({pat,days,lastRecord:last,suc:getSucursal(last.Destino),fi:null,estado,enCatalogo:false,"lastRecord.Fecha":last.Fecha||"","fi.tipoequipo":""});
+        const esSinSol = last.Cliente === SIN_SOLICITUD;
+        res.push({pat,days,lastRecord:last,suc:getSucursal(last.Destino),fi:null,estado,enCatalogo:false,"lastRecord.Fecha":last.Fecha||"","fi.tipoequipo":"",esSinSol});
       }
     }
     return res;
   },[tractoIdx,ramplaIdx,flota,ultimosMap,today,tipo,soloDoc]);
 
-  // Conteos siempre sobre el universo de catálogo únicamente (para los botones)
   const catalogoEquipos = useMemo(()=>{
     const idx = tipo==="tracto" ? tractoIdx : ramplaIdx;
     const res = [];
@@ -570,7 +563,7 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       const u=ultimosMap.get(pat);
       if(u&&(!lastDate||u._date>lastDate)){
         lastDate=u._date;
-        lastRecord={Fecha:formatDate(u._date),Destino:u.Destino,Origen:u.Origen,Cliente:u.Cliente,Tracto:pat,Rampla:pat};
+        lastRecord={Fecha:formatDate(u._date),Destino:u.Destino};
       }
       const days=lastDate?daysBetween(lastDate,today):null;
       const estado=getEstadoEquipo(days);
@@ -624,7 +617,6 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
           <option value="rampla">Ramplas / Equipos</option>
           <option value="tracto">Tractocamiones</option>
         </select>
-        {/* Toggle solo documentación */}
         <button onClick={()=>setSoloDoc(d=>!d)} style={{
           display:"flex",alignItems:"center",gap:"6px",padding:"8px 14px",
           borderRadius:"8px",border:`2px solid ${soloDoc?T.grn:T.bd}`,
@@ -638,16 +630,14 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       </div>
     </div>
 
-    {/* Aviso fuente */}
     <div style={{background:soloDoc?`${T.grn}0a`:`${T.ac}0a`,border:`1px solid ${soloDoc?T.grn:T.ac}33`,borderRadius:"10px",padding:"8px 16px",marginBottom:"14px",fontSize:"11px",color:T.txM,display:"flex",alignItems:"center",gap:"8px"}}>
       <span style={{fontSize:"14px"}}>{soloDoc?"📋":"🔍"}</span>
       {soloDoc
-        ? <span>Mostrando solo equipos <strong style={{color:T.tx}}>registrados en el catálogo de flota</strong> (hoja Flota del Google Sheets). Los equipos dados de baja o siniestrados no aparecen.</span>
+        ? <span>Mostrando solo equipos <strong style={{color:T.tx}}>registrados en el catálogo de flota</strong>. La sucursal indicada es la del <strong style={{color:T.tx}}>último destino registrado</strong>, incluyendo viajes de remonta/vacío.</span>
         : <span>Mostrando <strong style={{color:T.tx}}>todos</strong> incluyendo equipos con viajes pero <strong style={{color:T.ac}}>sin registro en catálogo</strong> (subcontratos, dados de baja, etc).</span>
       }
     </div>
 
-    {/* Botones filtro estado */}
     <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"16px"}}>
       {estadoBtns.map(b=>{
         const active=filtroEstado===b.key;
@@ -675,7 +665,6 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
           {" · Click columna = ordenar"}
         </span>
         <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap"}}>
-          {/* Paginación superior */}
           {totalP>1&&<>
             {btnPag(()=>setPg(1),pg===1,"«")}
             {btnPag(()=>setPg(p=>Math.max(1,p-1)),pg===1,"‹")}
@@ -683,7 +672,6 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
             {btnPag(()=>setPg(p=>Math.min(totalP,p+1)),pg===totalP,"›")}
             {btnPag(()=>setPg(totalP),pg===totalP,"»")}
           </>}
-          {/* Botón PDF */}
           <button onClick={()=>printReporte(sorted,tipo,filtroEstado,filtroSuc,today)} style={{
             display:"flex",alignItems:"center",gap:"6px",padding:"7px 14px",
             borderRadius:"8px",border:`1px solid ${T.red}44`,
@@ -716,11 +704,14 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
               <td style={{...td,fontWeight:700}}>{r.pat}</td>
               <td style={{...td,color:ec,fontWeight:600}}>{r.days!==null?r.days+"d":"—"}</td>
               <td style={td}>{r.lastRecord?.Fecha||"—"}</td>
-              <td style={td}>{r.lastRecord?.Destino||"—"}</td>
+              <td style={td}>
+                {r.lastRecord?.Destino||"—"}
+                {r.esSinSol&&<span style={{marginLeft:"4px",fontSize:"9px",color:T.txM,fontStyle:"italic"}}>(remonta)</span>}
+              </td>
               <td style={td}><SucBadge s={r.suc} T={T}/></td>
               <td style={td}><span style={badge(ec)}>{r.estado}</span></td>
               <td style={td}>{tipo==="tracto"?r.lastRecord?.Rampla:r.lastRecord?.Tracto}</td>
-              <td style={td}>{r.lastRecord?.Cliente||"—"}</td>
+              <td style={{...td,color:r.esSinSol?T.txM:T.tx,fontStyle:r.esSinSol?"italic":"normal"}}>{r.esSinSol?"—":r.lastRecord?.Cliente||"—"}</td>
               <td style={td}>{r.fi?.tipoequipo||"—"}</td>
               {!soloDoc&&<td style={td}><span style={badge(r.enCatalogo?T.grn:T.txM)}>{r.enCatalogo?"Sí":"No"}</span></td>}
             </tr>);
@@ -728,7 +719,6 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
         </table>
       </div>
 
-      {/* Paginación inferior con números */}
       {totalP>1&&(
         <div style={{display:"flex",gap:"4px",alignItems:"center",justifyContent:"center",marginTop:"12px"}}>
           {btnPag(()=>setPg(1),pg===1,"«")}
@@ -760,7 +750,10 @@ function StatsCliente({data,today,T}){
 
   const rawStats=useMemo(()=>{
     const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
-    const filtered=months===99?data:data.filter(d=>d._date>=cutoff);const byC={};
+    // EXCLUIR viajes sin solicitud de estadísticas por cliente
+    const filtered=(months===99?data:data.filter(d=>d._date>=cutoff))
+      .filter(d=>d.Cliente!==SIN_SOLICITUD);
+    const byC={};
     filtered.forEach(d=>{const c=d.Cliente;if(!byC[c])byC[c]={cliente:c,km:0,tramos:0,sols:new Set(),cargas:{}};byC[c].km+=Number(d.Kilometro)||0;byC[c].tramos++;if(d.Solicitud)byC[c].sols.add(d.Solicitud);const cg=d.Carga?.trim();if(cg&&!/^\d+$/.test(cg))byC[c].cargas[cg]=(byC[c].cargas[cg]||0)+1;});
     return Object.values(byC).map(c=>({...c,sols:c.sols.size,topCargas:Object.entries(c.cargas).sort((a,b)=>b[1]-a[1]).slice(0,3)}));
   },[data,today,months]);
@@ -774,7 +767,7 @@ function StatsCliente({data,today,T}){
       <select value={months} onChange={e=>setMonths(+e.target.value)} style={sel}><option value={1}>1 mes</option><option value={2}>2 meses</option><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>1 año</option><option value={99}>Todo</option></select>
     </div>
     <div style={card}>
-      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar</div>
+      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar · Excluye viajes de remonta/vacío</div>
       <div style={{maxHeight:"500px",overflowY:"auto",overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
           <thead><tr>
@@ -820,7 +813,10 @@ function StatsRuta({data,today,T}){
 
   const rawStats=useMemo(()=>{
     const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
-    const filtered=months===99?data:data.filter(d=>d._date>=cutoff);const byR={};
+    // EXCLUIR viajes sin solicitud de estadísticas por ruta
+    const filtered=(months===99?data:data.filter(d=>d._date>=cutoff))
+      .filter(d=>d.Cliente!==SIN_SOLICITUD);
+    const byR={};
     filtered.forEach(d=>{const k=d.Origen+" → "+d.Destino;if(!byR[k])byR[k]={ruta:k,o:d.Origen,d:d.Destino,km:0,count:0,cls:new Set(),cargas:{}};byR[k].km+=Number(d.Kilometro)||0;byR[k].count++;byR[k].cls.add(d.Cliente);const cg=d.Carga?.trim();if(cg&&!/^\d+$/.test(cg))byR[k].cargas[cg]=(byR[k].cargas[cg]||0)+1;});
     return Object.values(byR).filter(r=>r.count>=minTrips).map(r=>({...r,avg:Math.round(r.km/r.count),cls:r.cls.size,topCarga:Object.entries(r.cargas).sort((a,b)=>b[1]-a[1])[0]?.[0]||"-"}));
   },[data,today,months,minTrips]);
@@ -836,7 +832,7 @@ function StatsRuta({data,today,T}){
       </div>
     </div>
     <div style={card}>
-      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar</div>
+      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar · Excluye viajes de remonta/vacío</div>
       <div style={{maxHeight:"500px",overflowY:"auto",overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
           <thead><tr>
@@ -875,12 +871,15 @@ function Detalle({data,T}){
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
   const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
 
-  const cls=useMemo(()=>[...new Set(data.map(d=>d.Cliente))].sort(),[data]);
-  const cgs=useMemo(()=>[...new Set(data.map(d=>d.Carga?.trim()).filter(c=>c&&!/^\d+$/.test(c)))].sort(),[data]);
-  const filtered=useMemo(()=>{let f=data;if(fd){const d=new Date(fd);f=f.filter(r=>r._date>=d);}if(fh){const d=new Date(fh);d.setDate(d.getDate()+1);f=f.filter(r=>r._date<d);}
+  // En Detalle EXCLUIMOS viajes sin solicitud — son rutas internas sin cliente
+  const dataFiltrada = useMemo(()=>data.filter(d=>d.Cliente!==SIN_SOLICITUD),[data]);
+
+  const cls=useMemo(()=>[...new Set(dataFiltrada.map(d=>d.Cliente))].sort(),[dataFiltrada]);
+  const cgs=useMemo(()=>[...new Set(dataFiltrada.map(d=>d.Carga?.trim()).filter(c=>c&&!/^\d+$/.test(c)))].sort(),[dataFiltrada]);
+  const filtered=useMemo(()=>{let f=dataFiltrada;if(fd){const d=new Date(fd);f=f.filter(r=>r._date>=d);}if(fh){const d=new Date(fh);d.setDate(d.getDate()+1);f=f.filter(r=>r._date<d);}
     if(cl)f=f.filter(r=>r.Cliente===cl);if(tr)f=f.filter(r=>r.Tracto?.toUpperCase().includes(tr.toUpperCase()));if(ra)f=f.filter(r=>r.Rampla?.toUpperCase().includes(ra.toUpperCase()));
     if(or)f=f.filter(r=>r.Origen?.toUpperCase().includes(or.toUpperCase()));if(de)f=f.filter(r=>r.Destino?.toUpperCase().includes(de.toUpperCase()));if(cg)f=f.filter(r=>r.Carga===cg);return f;
-  },[data,fd,fh,cl,tr,ra,or,de,cg]);
+  },[dataFiltrada,fd,fh,cl,tr,ra,or,de,cg]);
 
   const{sorted,sortKey,sortDir,toggle}=useSortable(filtered,"_date","desc");
   const totalP=Math.ceil(sorted.length/pp);const pd=sorted.slice((pg-1)*pp,pg*pp);
@@ -950,7 +949,6 @@ function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
   const flotaArr=useMemo(()=>{const arr=[];
     for(const[pat,v]of flota.entries()){
       const cat=getCategoria(v.tipoequipo);
-      // Buscar último viaje: primero en CSV, luego en ultimosMap
       const tramos=tractoIdx.get(pat)||ramplaIdx.get(pat);
       let lastTrip=tramos?tramos[0]:null;
       let lastDate=lastTrip?lastTrip._date:null;
@@ -964,7 +962,8 @@ function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
       const daysI=lastDate?daysBetween(lastDate,today):null;
       const age=v.fecha?(today.getFullYear()-parseInt(v.fecha)):null;
       const estado=getEstadoEquipo(daysI);
-      arr.push({pat,...v,cat,lastTrip,daysI,age,estado});
+      const esSinSol = lastTrip?.Cliente === SIN_SOLICITUD;
+      arr.push({pat,...v,cat,lastTrip,daysI,age,estado,esSinSol});
     }
     return arr;
   },[flota,tractoIdx,ramplaIdx,ultimosMap,today]);
@@ -990,7 +989,7 @@ function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
       {" · "}<span style={{color:T.ac}}>● INACTIVO</span> 31–90d
       {" · "}<span style={{color:T.red}}>● PARADO</span> +90d
       {" · "}<span style={{color:T.txM}}>● SIN VIAJES</span> sin historial
-      {" · Incluye historial de Últimos Viajes para equipos pre-2024"}
+      {" · Incluye viajes de remonta/vacío para determinar última ubicación"}
     </div>
     <div style={card}>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:"8px"}}>
@@ -1062,7 +1061,10 @@ function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
               <td style={{...td,color:f.age>10?T.red:f.age>6?T.ac:T.grn,fontWeight:600}}>{f.age!==null?f.age+" años":"-"}</td>
               <td style={td}><span style={badge(ec)}>{f.estado}</span></td>
               <td style={{...td,color:ec,fontWeight:600}}>{f.daysI!==null?f.daysI+"d":"—"}</td>
-              <td style={td}>{f.lastTrip?.Destino||"-"}</td>
+              <td style={td}>
+                {f.lastTrip?.Destino||"-"}
+                {f.esSinSol&&<span style={{marginLeft:"4px",fontSize:"9px",color:T.txM,fontStyle:"italic"}}>(remonta)</span>}
+              </td>
               <td style={td}>{f.lastTrip?.Fecha||"-"}</td>
             </tr>
           );})}
@@ -1099,6 +1101,7 @@ export default function App(){
 
   const{tractoIdx,ramplaIdx}=useMemo(()=>{
     const ti=new Map(),ri=new Map();
+    // Indexar TODOS los viajes incluyendo sin solicitud (para último destino)
     for(const row of data){
       if(row.Tracto){if(!ti.has(row.Tracto))ti.set(row.Tracto,[]);ti.get(row.Tracto).push(row);}
       if(row.Rampla){if(!ri.has(row.Rampla))ri.set(row.Rampla,[]);ri.get(row.Rampla).push(row);}
@@ -1108,12 +1111,10 @@ export default function App(){
 
   useEffect(()=>{
     let vd=null,fd=null,ud=null;
-    let ultimosReady=false; // se marca true cuando llega (o falla)
+    let ultimosReady=false;
 
     const tryFinalize=()=>{
-      // Necesitamos viajes + flota. Ultimos es opcional pero esperamos hasta 3s.
       if(!vd||!fd)return;
-      // Si ultimos aún no llegó, esperamos un poco más (máx 3 intentos de 500ms)
       if(!ultimosReady){
         setTimeout(tryFinalize, 500);
         return;
@@ -1122,14 +1123,16 @@ export default function App(){
       setLoadMsg("Indexando...");
       setTimeout(()=>{
         try{
-          let rows=vd.filter(r=>r.Cliente!=="-Viaje sin solicitud -");
+          // ── CAMBIO CLAVE: NO filtrar viajes sin solicitud aquí ──
+          // Se incluyen TODOS para que el último destino del equipo sea correcto.
+          // El filtro se aplica en cada vista analítica (StatsCliente, StatsRuta, Detalle).
+          let rows=vd;
           rows=rows.map(r=>({...r,_date:parseDate(r.Fecha)})).filter(r=>r._date);
           rows.sort((a,b)=>b._date-a._date||(b.Expedicion||"").localeCompare(a.Expedicion||""));
           const maxD=rows.length?rows[0]._date:null;const minD=rows.length?rows[rows.length-1]._date:null;
           const fm=new Map();
           fd.forEach(r=>{const pat=cleanPatente(r.patente);if(pat&&pat!=="AA1111"&&pat!=="AAA111")fm.set(pat,{marca:r.marca?.trim()||"",modelo:r.modelo?.trim()||"",fecha:r.fecha?.trim()||"",tipoequipo:r.tipoequipo?.trim()||""});});
 
-          // Construir mapa ultimos_viajes
           const um=new Map();
           if(ud&&ud.length){
             ud.forEach(r=>{
@@ -1150,13 +1153,23 @@ export default function App(){
             });
           }
 
-          setInfo({total:rows.length,minDate:minD?formatDate(minD):"-",maxDate:maxD?formatDate(maxD):"-",tractos:new Set(rows.map(r=>r.Tracto).filter(Boolean)).size,ramplas:new Set(rows.map(r=>r.Rampla).filter(Boolean)).size,clientes:new Set(rows.map(r=>r.Cliente).filter(Boolean)).size,flotaTotal:fm.size,ultimosTotal:um.size});
+          // Para el banner: contar clientes excluyendo "sin solicitud"
+          const rowsConSolicitud = rows.filter(r=>r.Cliente!==SIN_SOLICITUD);
+          setInfo({
+            total:rows.length,
+            minDate:minD?formatDate(minD):"-",
+            maxDate:maxD?formatDate(maxD):"-",
+            tractos:new Set(rows.map(r=>r.Tracto).filter(Boolean)).size,
+            ramplas:new Set(rows.map(r=>r.Rampla).filter(Boolean)).size,
+            clientes:new Set(rowsConSolicitud.map(r=>r.Cliente).filter(Boolean)).size,
+            flotaTotal:fm.size,
+            ultimosTotal:um.size
+          });
           setData(rows);setFlota(fm);setUltimosMap(um);setLoading(false);
         }catch(e){setError("Error: "+e.message);setLoading(false);}
       },100);
     };
 
-    // Timeout máximo para ultimos_viajes: si en 4s no llega, seguimos sin él
     const ultimosTimeout = setTimeout(()=>{
       if(!ultimosReady){ ultimosReady=true; ud=ud||[]; tryFinalize(); }
     }, 4000);
