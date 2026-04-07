@@ -429,11 +429,87 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   </div>);
 }
 
+// ═══ PDF PRINT HELPER — formato simple ═══
+function printReporte(rows, tipo, filtroEstado, filtroSuc, today) {
+  const fecha = formatDate(today);
+  const tipoLabel = tipo === "tracto" ? "Tractocamiones" : "Ramplas / Equipos";
+  const estadoLabel = filtroEstado === "todos" ? "Todos" : filtroEstado;
+  const sucLabel = filtroSuc === "todas" ? "Todas las sucursales" : filtroSuc;
+
+  const EC = { "ACTIVO":"#16a34a","INACTIVO":"#d97706","PARADO":"#dc2626","SIN VIAJES":"#94a3b8" };
+
+  const filas = rows.map((r, i) => {
+    const ec = EC[r.estado] || "#64748b";
+    return `<tr style="background:${i%2===0?"#fff":"#f8fafc"}">
+      <td>${r.pat}</td>
+      <td style="color:${ec};font-weight:700">${r.days !== null ? r.days + "d" : "—"}</td>
+      <td>${r.lastRecord?.Fecha || "—"}</td>
+      <td>${r.lastRecord?.Destino || "—"}</td>
+      <td>${r.suc}</td>
+      <td><span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:${ec}18;color:${ec};border:1px solid ${ec}44">${r.estado}</span></td>
+      <td>${r.fi?.tipoequipo || "—"}</td>
+    </tr>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+  <title>Equipos ${estadoLabel} – ${sucLabel}</title>
+  <style>
+    @page { size: A4 landscape; margin: 14mm 12mm; }
+    body { font-family: Arial, sans-serif; font-size: 12px; color: #0f172a; margin: 0; }
+    .hdr { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f59e0b; padding-bottom: 10px; margin-bottom: 12px; }
+    .logo { width: 36px; height: 36px; background: linear-gradient(135deg,#f59e0b,#f97316); border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font-weight: 900; font-size: 15px; color: #000; margin-right: 10px; }
+    .tit { font-size: 17px; font-weight: 700; }
+    .sub { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 1.5px; }
+    .meta { font-size: 10px; color: #475569; text-align: right; line-height: 1.9; }
+    .chips { display: flex; gap: 10px; margin-bottom: 12px; }
+    .chip { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 20px; padding: 3px 12px; font-size: 10px; color: #475569; }
+    .chip strong { color: #0f172a; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #f1f5f9; text-align: left; padding: 7px 10px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #475569; border-bottom: 2px solid #cbd5e1; white-space: nowrap; }
+    td { padding: 6px 10px; border-bottom: 1px solid #e2e8f0; font-size: 11px; vertical-align: middle; }
+    .footer { position: fixed; bottom: 6mm; left: 12mm; right: 12mm; font-size: 9px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 3px; display: flex; justify-content: space-between; }
+  </style></head><body>
+  <div class="hdr">
+    <div style="display:flex;align-items:center">
+      <div class="logo">TB</div>
+      <div><div class="tit">Reporte de Equipos</div><div class="sub">Transportes Bello e Hijos Ltda.</div></div>
+    </div>
+    <div class="meta">
+      <div><strong>Fecha:</strong> ${fecha}</div>
+      <div><strong>Total:</strong> ${rows.length} equipos</div>
+    </div>
+  </div>
+  <div class="chips">
+    <div class="chip"><strong>Tipo:</strong> ${tipoLabel}</div>
+    <div class="chip"><strong>Estado:</strong> ${estadoLabel}</div>
+    <div class="chip"><strong>Sucursal:</strong> ${sucLabel}</div>
+  </div>
+  <table>
+    <thead><tr>
+      <th>Patente</th><th>Días</th><th>Último Mov.</th><th>Destino</th>
+      <th>Sucursal</th><th>Estado</th><th>Tipo Equipo</th>
+    </tr></thead>
+    <tbody>${filas}</tbody>
+  </table>
+  <div class="footer">
+    <span>Transportes Bello e Hijos Ltda. · Dashboard Operaciones</span>
+    <span>${tipoLabel} · ${estadoLabel} · ${sucLabel} · ${fecha}</span>
+  </div>
+  </body></html>`;
+
+  const win = window.open("", "_blank", "width=1100,height=800");
+  win.document.write(html);
+  win.document.close();
+  win.onload = () => { win.focus(); win.print(); };
+}
+
 // ═══ VIEW 3: INACTIVOS ═══
 function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const[tipo,setTipo]=useState("rampla");
   const[filtroEstado,setFiltroEstado]=useState("todos");
   const[filtroSuc,setFiltroSuc]=useState("todas");
+  // soloDocumentacion = true por defecto: mostrar SOLO equipos del catálogo (hoja Flota)
+  const[soloDoc,setSoloDoc]=useState(true);
   const[pg,setPg]=useState(1);
   const PP=100;
 
@@ -443,9 +519,12 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
   const badge=(c)=>({display:"inline-block",padding:"2px 8px",borderRadius:"4px",fontSize:"11px",fontWeight:600,background:`${c}22`,color:c,border:`1px solid ${c}44`});
 
+  // Construir lista: primero siempre desde catálogo (flota), luego opcionalmente los sin catálogo
   const allEquipos = useMemo(()=>{
     const idx = tipo==="tracto" ? tractoIdx : ramplaIdx;
     const res = [];
+
+    // ─ Equipos EN catálogo ─
     for(const[pat,fi] of flota.entries()){
       const cat = getCategoria(fi.tipoequipo);
       if(tipo==="tracto" && cat!=="TRACTOCAMION") continue;
@@ -462,22 +541,49 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       const estado=getEstadoEquipo(days);
       res.push({pat,days,lastRecord,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS",fi,estado,enCatalogo:true,"lastRecord.Fecha":lastRecord?.Fecha||"","fi.tipoequipo":fi.tipoequipo||""});
     }
-    for(const[pat,tr] of idx.entries()){
-      if(flota.has(pat)) continue;
-      const lastDate=tr[0]._date;
-      const days=daysBetween(lastDate,today);
-      const last=tr[0];
+
+    // ─ Equipos FUERA de catálogo (solo si soloDoc=false) ─
+    if(!soloDoc){
+      for(const[pat,tr] of idx.entries()){
+        if(flota.has(pat)) continue;
+        const lastDate=tr[0]._date;
+        const days=daysBetween(lastDate,today);
+        const last=tr[0];
+        const estado=getEstadoEquipo(days);
+        res.push({pat,days,lastRecord:last,suc:getSucursal(last.Destino),fi:null,estado,enCatalogo:false,"lastRecord.Fecha":last.Fecha||"","fi.tipoequipo":""});
+      }
+    }
+    return res;
+  },[tractoIdx,ramplaIdx,flota,ultimosMap,today,tipo,soloDoc]);
+
+  // Conteos siempre sobre el universo de catálogo únicamente (para los botones)
+  const catalogoEquipos = useMemo(()=>{
+    const idx = tipo==="tracto" ? tractoIdx : ramplaIdx;
+    const res = [];
+    for(const[pat,fi] of flota.entries()){
+      const cat = getCategoria(fi.tipoequipo);
+      if(tipo==="tracto" && cat!=="TRACTOCAMION") continue;
+      if(tipo==="rampla" && cat!=="EQUIPO") continue;
+      const tr = idx.get(pat);
+      let lastDate=null, lastRecord=null;
+      if(tr&&tr.length>0){ lastDate=tr[0]._date; lastRecord=tr[0]; }
+      const u=ultimosMap.get(pat);
+      if(u&&(!lastDate||u._date>lastDate)){
+        lastDate=u._date;
+        lastRecord={Fecha:formatDate(u._date),Destino:u.Destino,Origen:u.Origen,Cliente:u.Cliente,Tracto:pat,Rampla:pat};
+      }
+      const days=lastDate?daysBetween(lastDate,today):null;
       const estado=getEstadoEquipo(days);
-      res.push({pat,days,lastRecord:last,suc:getSucursal(last.Destino),fi:null,estado,enCatalogo:false,"lastRecord.Fecha":last.Fecha||"","fi.tipoequipo":""});
+      res.push({estado,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS"});
     }
     return res;
   },[tractoIdx,ramplaIdx,flota,ultimosMap,today,tipo]);
 
   const estadoCount=useMemo(()=>{
     const m={ACTIVO:0,INACTIVO:0,PARADO:0,"SIN VIAJES":0};
-    allEquipos.forEach(r=>{m[r.estado]=(m[r.estado]||0)+1;});
+    catalogoEquipos.forEach(r=>{m[r.estado]=(m[r.estado]||0)+1;});
     return m;
-  },[allEquipos]);
+  },[catalogoEquipos]);
 
   const sucursales=useMemo(()=>[...new Set(allEquipos.map(r=>r.suc))].sort(),[allEquipos]);
 
@@ -492,22 +598,24 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const totalP=Math.ceil(sorted.length/PP);
   const pd=sorted.slice((pg-1)*PP,pg*PP);
 
-  // Reset página al cambiar filtros
-  useEffect(()=>setPg(1),[filtroEstado,filtroSuc,tipo]);
+  useEffect(()=>setPg(1),[filtroEstado,filtroSuc,tipo,soloDoc]);
 
-  // Botones de filtro por estado
   const estadoBtns=[
-    {key:"todos",label:"Todos",count:allEquipos.length,color:T.tx},
+    {key:"todos",label:"Todos",count:catalogoEquipos.length,color:T.tx},
     {key:"ACTIVO",label:"Activos",count:estadoCount.ACTIVO,color:T.grn},
     {key:"INACTIVO",label:"Inactivos",count:estadoCount.INACTIVO,color:T.ac},
     {key:"PARADO",label:"Parados",count:estadoCount.PARADO,color:T.red},
     {key:"SIN VIAJES",label:"Sin viajes",count:estadoCount["SIN VIAJES"],color:T.txM},
   ];
 
+  const btnPag=(onClick,disabled,label)=>(
+    <button onClick={onClick} disabled={disabled} style={{padding:"5px 9px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:disabled?.3:1,fontFamily:"inherit"}}>{label}</button>
+  );
+
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
       <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⚠️ Estado de Equipos</h2>
-      <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"}}>
         <select value={filtroSuc} onChange={e=>setFiltroSuc(e.target.value)} style={sel}>
           <option value="todas">Todas las sucursales</option>
           {sucursales.map(s=><option key={s} value={s}>{s}</option>)}
@@ -516,19 +624,30 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
           <option value="rampla">Ramplas / Equipos</option>
           <option value="tracto">Tractocamiones</option>
         </select>
+        {/* Toggle solo documentación */}
+        <button onClick={()=>setSoloDoc(d=>!d)} style={{
+          display:"flex",alignItems:"center",gap:"6px",padding:"8px 14px",
+          borderRadius:"8px",border:`2px solid ${soloDoc?T.grn:T.bd}`,
+          background:soloDoc?`${T.grn}12`:T.sf,cursor:"pointer",
+          fontSize:"11px",fontWeight:600,color:soloDoc?T.grn:T.txM,fontFamily:"inherit",
+          transition:"all 0.15s",
+        }}>
+          <span style={{fontSize:"14px"}}>{soloDoc?"✅":"☑️"}</span>
+          Solo en documentación
+        </button>
       </div>
     </div>
 
-    {/* Leyenda */}
-    <div style={{background:T.sf2,border:`1px solid ${T.bd}`,borderRadius:"10px",padding:"10px 16px",marginBottom:"16px",fontSize:"11px",color:T.txM}}>
-      <strong style={{color:T.tx}}>Criterio:</strong>
-      {" "}<span style={{color:T.grn}}>● ACTIVO</span> ≤30d
-      {" · "}<span style={{color:T.ac}}>● INACTIVO</span> 31–90d
-      {" · "}<span style={{color:T.red}}>● PARADO</span> +90d
-      {" · "}<span style={{color:T.txM}}>● SIN VIAJES</span> sin historial
+    {/* Aviso fuente */}
+    <div style={{background:soloDoc?`${T.grn}0a`:`${T.ac}0a`,border:`1px solid ${soloDoc?T.grn:T.ac}33`,borderRadius:"10px",padding:"8px 16px",marginBottom:"14px",fontSize:"11px",color:T.txM,display:"flex",alignItems:"center",gap:"8px"}}>
+      <span style={{fontSize:"14px"}}>{soloDoc?"📋":"🔍"}</span>
+      {soloDoc
+        ? <span>Mostrando solo equipos <strong style={{color:T.tx}}>registrados en el catálogo de flota</strong> (hoja Flota del Google Sheets). Los equipos dados de baja o siniestrados no aparecen.</span>
+        : <span>Mostrando <strong style={{color:T.tx}}>todos</strong> incluyendo equipos con viajes pero <strong style={{color:T.ac}}>sin registro en catálogo</strong> (subcontratos, dados de baja, etc).</span>
+      }
     </div>
 
-    {/* Botones filtro por estado — CLICKEABLES */}
+    {/* Botones filtro estado */}
     <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"16px"}}>
       {estadoBtns.map(b=>{
         const active=filtroEstado===b.key;
@@ -537,7 +656,7 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
             display:"flex",flexDirection:"column",alignItems:"center",padding:"12px 20px",
             borderRadius:"12px",border:`2px solid ${active?b.color:T.bd}`,
             background:active?`${b.color}18`:T.sf,
-            cursor:"pointer",transition:"all 0.15s",minWidth:"100px",
+            cursor:"pointer",transition:"all 0.15s",minWidth:"100px",fontFamily:"inherit",
             boxShadow:active?`0 0 0 1px ${b.color}44`:T.cardShadow,
           }}>
             <span style={{fontSize:"22px",fontWeight:700,color:b.color,lineHeight:1.2}}>{b.count.toLocaleString("es-CL")}</span>
@@ -550,21 +669,33 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
     <div style={card}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px",flexWrap:"wrap",gap:"8px"}}>
         <span style={{fontSize:"12px",color:T.txM}}>
-          Mostrando <strong style={{color:T.tx}}>{sorted.length.toLocaleString("es-CL")}</strong> equipos
-          {filtroEstado!=="todos"&&<span style={{color:T.ac}}> · Filtro: {filtroEstado}</span>}
+          <strong style={{color:T.tx}}>{sorted.length.toLocaleString("es-CL")}</strong> equipos
+          {filtroEstado!=="todos"&&<span style={{color:T.ac}}> · {filtroEstado}</span>}
           {filtroSuc!=="todas"&&<span style={{color:T.ac}}> · {filtroSuc}</span>}
-          {" · Click en columna para ordenar"}
+          {" · Click columna = ordenar"}
         </span>
-        {totalP>1&&(
-          <div style={{display:"flex",gap:"4px",alignItems:"center"}}>
-            <button onClick={()=>setPg(1)} disabled={pg===1} style={{padding:"5px 9px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===1?.3:1}}>«</button>
-            <button onClick={()=>setPg(p=>Math.max(1,p-1))} disabled={pg===1} style={{padding:"5px 9px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===1?.3:1}}>‹</button>
-            <span style={{fontSize:"11px",color:T.txM,padding:"0 8px"}}>{pg} / {totalP} · {((pg-1)*PP+1).toLocaleString()}–{Math.min(pg*PP,sorted.length).toLocaleString()} de {sorted.length.toLocaleString()}</span>
-            <button onClick={()=>setPg(p=>Math.min(totalP,p+1))} disabled={pg===totalP} style={{padding:"5px 9px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===totalP?.3:1}}>›</button>
-            <button onClick={()=>setPg(totalP)} disabled={pg===totalP} style={{padding:"5px 9px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===totalP?.3:1}}>»</button>
-          </div>
-        )}
+        <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap"}}>
+          {/* Paginación superior */}
+          {totalP>1&&<>
+            {btnPag(()=>setPg(1),pg===1,"«")}
+            {btnPag(()=>setPg(p=>Math.max(1,p-1)),pg===1,"‹")}
+            <span style={{fontSize:"11px",color:T.txM,padding:"0 6px"}}>{pg}/{totalP} · {((pg-1)*PP+1)}–{Math.min(pg*PP,sorted.length)} de {sorted.length}</span>
+            {btnPag(()=>setPg(p=>Math.min(totalP,p+1)),pg===totalP,"›")}
+            {btnPag(()=>setPg(totalP),pg===totalP,"»")}
+          </>}
+          {/* Botón PDF */}
+          <button onClick={()=>printReporte(sorted,tipo,filtroEstado,filtroSuc,today)} style={{
+            display:"flex",alignItems:"center",gap:"6px",padding:"7px 14px",
+            borderRadius:"8px",border:`1px solid ${T.red}44`,
+            background:`${T.red}12`,color:T.red,cursor:"pointer",
+            fontSize:"11px",fontWeight:700,fontFamily:"inherit",
+            boxShadow:`0 1px 3px ${T.red}22`,transition:"all 0.15s",
+          }}>
+            📄 Exportar PDF
+          </button>
+        </div>
       </div>
+
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
           <thead><tr>
@@ -577,7 +708,7 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
             <th style={thStyle}>{tipo==="tracto"?"Rampla":"Tracto"}</th>
             <th style={thStyle}>Cliente</th>
             <SortTh label="Tipo Equipo" col="fi.tipoequipo" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
-            <SortTh label="En Catálogo" col="enCatalogo" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            {!soloDoc&&<SortTh label="Catálogo" col="enCatalogo" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>}
           </tr></thead>
           <tbody>{pd.map((r,i)=>{
             const ec=ESTADO_COLOR(r.estado,T);
@@ -591,16 +722,17 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
               <td style={td}>{tipo==="tracto"?r.lastRecord?.Rampla:r.lastRecord?.Tracto}</td>
               <td style={td}>{r.lastRecord?.Cliente||"—"}</td>
               <td style={td}>{r.fi?.tipoequipo||"—"}</td>
-              <td style={td}><span style={badge(r.enCatalogo?T.grn:T.txM)}>{r.enCatalogo?"Sí":"No"}</span></td>
+              {!soloDoc&&<td style={td}><span style={badge(r.enCatalogo?T.grn:T.txM)}>{r.enCatalogo?"Sí":"No"}</span></td>}
             </tr>);
           })}</tbody>
         </table>
       </div>
-      {/* Paginación inferior también */}
+
+      {/* Paginación inferior con números */}
       {totalP>1&&(
         <div style={{display:"flex",gap:"4px",alignItems:"center",justifyContent:"center",marginTop:"12px"}}>
-          <button onClick={()=>setPg(1)} disabled={pg===1} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===1?.3:1}}>«</button>
-          <button onClick={()=>setPg(p=>Math.max(1,p-1))} disabled={pg===1} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===1?.3:1}}>‹</button>
+          {btnPag(()=>setPg(1),pg===1,"«")}
+          {btnPag(()=>setPg(p=>Math.max(1,p-1)),pg===1,"‹")}
           {Array.from({length:Math.min(7,totalP)},(_,i)=>{
             let p;
             if(totalP<=7) p=i+1;
@@ -608,10 +740,10 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
             else if(pg>=totalP-3) p=totalP-6+i;
             else p=pg-3+i;
             if(p<1||p>totalP) return null;
-            return(<button key={p} onClick={()=>setPg(p)} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${p===pg?T.ac:T.bd}`,background:p===pg?T.acD:T.sf2,color:p===pg?T.ac:T.tx,cursor:"pointer",fontSize:"11px",fontWeight:p===pg?700:400}}>{p}</button>);
+            return(<button key={p} onClick={()=>setPg(p)} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${p===pg?T.ac:T.bd}`,background:p===pg?T.acD:T.sf2,color:p===pg?T.ac:T.tx,cursor:"pointer",fontSize:"11px",fontWeight:p===pg?700:400,fontFamily:"inherit"}}>{p}</button>);
           })}
-          <button onClick={()=>setPg(p=>Math.min(totalP,p+1))} disabled={pg===totalP} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===totalP?.3:1}}>›</button>
-          <button onClick={()=>setPg(totalP)} disabled={pg===totalP} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===totalP?.3:1}}>»</button>
+          {btnPag(()=>setPg(p=>Math.min(totalP,p+1)),pg===totalP,"›")}
+          {btnPag(()=>setPg(totalP),pg===totalP,"»")}
         </div>
       )}
     </div>
