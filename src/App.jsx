@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Papa from "papaparse";
 
 const CSV_VIAJES = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856GFyKLBBXGcgeUnkqttWGvFXbbeKDwGWoNDuBd0Tn9VJLDfRSezlD8zHi8Q_E6RlciYlT/pub?gid=0&single=true&output=csv";
 const CSV_FLOTA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856GFyKLBBXGcgeUnkqttWGvFXbbeKDwGWoNDuBd0Tn9VJLDfRSezlD8zHi8Q_E6RlciYlT/pub?gid=923646374&single=true&output=csv";
+const CSV_ULTIMOS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856GFyKLBBXGcgeUnkqttWGvFXbbeKDwGWoNDuBd0Tn9VJLDfRSezlD8zHi8Q_E6RlciYlT/pub?gid=1827964132&single=true&output=csv";
 
 // ─── Sucursales ───
 const SUCURSAL_MAP = {
@@ -43,10 +44,29 @@ function getCategoria(tipo){
   if(EQUIPO_KEYWORDS.some(k => t.includes(k))) return "EQUIPO";
   return "OTRO";
 }
-function cleanPatente(p){if(!p)return "";const s=p.trim().toUpperCase();const i=s.lastIndexOf("-");return i>0?s.substring(0,i):s;}
-function parseDate(str){if(!str)return null;const[d,m,y]=str.split("/");return new Date(+y,+m-1,+d);}
+function cleanPatente(p){if(!p)return "";const s=String(p).trim().toUpperCase();const i=s.lastIndexOf("-");return i>0?s.substring(0,i):s;}
+function parseDate(str){if(!str)return null;if(str instanceof Date)return str;const[d,m,y]=String(str).split("/");if(!d||!m||!y)return null;return new Date(+y,+m-1,+d);}
 function formatDate(d){if(!d)return "-";return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();}
 function daysBetween(d1,d2){return Math.floor((d2-d1)/86400000);}
+
+// ─── ESTADO EQUIPO — lógica centralizada ───
+// ACTIVO: tuvo viaje en los últimos 30 días
+// INACTIVO: último viaje hace 31-90 días
+// PARADO: último viaje hace más de 90 días
+// SIN VIAJES REGISTRADOS: no aparece en ningún historial (ni CSV viajes ni ultimos_viajes)
+// SIN VIAJES EN SISTEMA: aparece en ultimos_viajes pero no en CSV viajes (historial anterior a ene-2024)
+function getEstadoEquipo(daysInactive) {
+  if (daysInactive === null || daysInactive === undefined) return "SIN VIAJES";
+  if (daysInactive <= 30) return "ACTIVO";
+  if (daysInactive <= 90) return "INACTIVO";
+  return "PARADO";
+}
+const ESTADO_COLOR = (estado, T) => ({
+  "ACTIVO": T.grn,
+  "INACTIVO": T.ac,
+  "PARADO": T.red,
+  "SIN VIAJES": T.txM,
+}[estado] || T.txM);
 
 // ─── THEME TOKENS ───
 function makeTheme(dark) {
@@ -76,6 +96,43 @@ function makeTheme(dark) {
   };
 }
 
+// ─── SORTABLE TABLE HOOK ───
+function useSortable(data, defaultKey, defaultDir = "asc") {
+  const [sortKey, setSortKey] = useState(defaultKey);
+  const [sortDir, setSortDir] = useState(defaultDir);
+  const toggle = useCallback((key) => {
+    setSortDir(d => sortKey === key ? (d === "asc" ? "desc" : "asc") : "asc");
+    setSortKey(key);
+  }, [sortKey]);
+  const sorted = useMemo(() => {
+    if (!sortKey) return data;
+    return [...data].sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if (av == null) av = sortDir === "asc" ? Infinity : -Infinity;
+      if (bv == null) bv = sortDir === "asc" ? Infinity : -Infinity;
+      if (typeof av === "string" && typeof bv === "string") return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
+  }, [data, sortKey, sortDir]);
+  return { sorted, sortKey, sortDir, toggle };
+}
+
+// ─── SORT HEADER ───
+function SortTh({ label, col, sortKey, sortDir, toggle, style }) {
+  const active = sortKey === col;
+  return (
+    <th
+      onClick={() => toggle(col)}
+      style={{ ...style, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
+    >
+      {label}
+      <span style={{ marginLeft: 4, opacity: active ? 1 : 0.3, fontSize: "10px" }}>
+        {active ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+      </span>
+    </th>
+  );
+}
+
 function StatCard({value,label,icon,color,T}){
   return(<div style={{background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",textAlign:"center",flex:"1",minWidth:"150px",boxShadow:T.cardShadow}}>
     <div style={{fontSize:"12px",marginBottom:"6px"}}>{icon}</div>
@@ -99,24 +156,10 @@ function Pager({page,total,set,T}){
   </div>);
 }
 
-// ─── THEME TOGGLE BUTTON ───
 function ThemeToggle({dark, onToggle}) {
   return (
-    <button
-      onClick={onToggle}
-      title={dark ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
-      style={{
-        display:"flex", alignItems:"center", gap:"6px",
-        padding:"7px 13px", borderRadius:"20px", border:"none",
-        cursor:"pointer", fontSize:"12px", fontWeight:600,
-        background: dark ? "#252a36" : "#e2e8f0",
-        color: dark ? "#e0e4ec" : "#475569",
-        transition:"all 0.2s", whiteSpace:"nowrap",
-        boxShadow: dark ? "0 1px 3px rgba(0,0,0,0.3)" : "0 1px 2px rgba(0,0,0,0.08)",
-      }}
-    >
-      <span style={{fontSize:"15px"}}>{dark ? "☀️" : "🌙"}</span>
-      <span style={{display:"none"}}>{dark ? "Claro" : "Oscuro"}</span>
+    <button onClick={onToggle} title={dark?"Cambiar a tema claro":"Cambiar a tema oscuro"} style={{display:"flex",alignItems:"center",gap:"6px",padding:"7px 13px",borderRadius:"20px",border:"none",cursor:"pointer",fontSize:"12px",fontWeight:600,background:dark?"#252a36":"#e2e8f0",color:dark?"#e0e4ec":"#475569",transition:"all 0.2s",whiteSpace:"nowrap",boxShadow:dark?"0 1px 3px rgba(0,0,0,0.3)":"0 1px 2px rgba(0,0,0,0.08)"}}>
+      <span style={{fontSize:"15px"}}>{dark?"☀️":"🌙"}</span>
     </button>
   );
 }
@@ -147,21 +190,9 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
           <option value="tracto">Tractos</option>
           <option value="rampla">Ramplas</option>
         </select>
-        <input
-          style={{...input,flex:1,minWidth:"200px"}}
-          placeholder="Buscar patente (mín. 3 caracteres)..."
-          value={q}
-          onChange={e=>setQ(e.target.value)}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="characters"
-        />
+        <input style={{...input,flex:1,minWidth:"200px"}} placeholder="Buscar patente (mín. 3 caracteres)..." value={q} onChange={e=>setQ(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="characters"/>
       </div>
-      {!results && (
-        <div style={{marginTop:"12px",padding:"14px",background:T.sf2,borderRadius:"8px",border:`1px dashed ${T.bd}`,textAlign:"center",color:T.txM,fontSize:"13px"}}>
-          Ingresa al menos 3 caracteres de la patente para buscar
-        </div>
-      )}
+      {!results&&<div style={{marginTop:"12px",padding:"14px",background:T.sf2,borderRadius:"8px",border:`1px dashed ${T.bd}`,textAlign:"center",color:T.txM,fontSize:"13px"}}>Ingresa al menos 3 caracteres de la patente para buscar</div>}
     </div>
     {results&&results.length===0&&<div style={{...card,textAlign:"center",color:T.txM}}>Sin resultados para "{q}"</div>}
     {results&&results.map((r,i)=>{
@@ -175,7 +206,7 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
           </div>
           <div style={{textAlign:"right"}}>
             <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>ÚLTIMO MOVIMIENTO</div>
-            <div style={{fontWeight:700,color:d>30?T.red:d>15?T.ac:T.grn,fontSize:"14px"}}>{last.Fecha} ({d===0?"hoy":`hace ${d}d`})</div>
+            <div style={{fontWeight:700,color:ESTADO_COLOR(getEstadoEquipo(d),T),fontSize:"14px"}}>{last.Fecha} ({d===0?"hoy":`hace ${d}d`})</div>
           </div>
         </div>
         <div style={{background:T.sf2,borderRadius:"8px",padding:"12px",marginBottom:"12px",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:"10px",border:`1px solid ${T.bd}`}}>
@@ -213,7 +244,12 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
 }
 
 // ═══ VIEW 2: ESTADO DE FLOTA ═══
-function EstadoFlota({data,tractoIdx,ramplaIdx,flota,today,T}){
+// CORRECCIÓN UTILIZACIÓN:
+// - Denominador: solo equipos del catálogo (flota) con categoría TRACTOCAMION/EQUIPO
+// - Numerador: de ese subconjunto, cuántos tuvieron al menos un viaje en el período
+// - Equipos sin viajes nunca (SIN VIAJES) se excluyen del numerador pero siguen en denominador
+// - Si un equipo tiene viajes SOLO en ultimos_viajes (pre-2024), usa esa última fecha
+function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const[days,setDays]=useState(30);
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
@@ -223,13 +259,94 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,today,T}){
 
   const stats=useMemo(()=>{
     const cutoff=new Date(today);cutoff.setDate(cutoff.getDate()-days);
-    let fT=0,fE=0,fO=0;for(const[,v]of flota.entries()){const c=getCategoria(v.tipoequipo);if(c==="TRACTOCAMION")fT++;else if(c==="EQUIPO")fE++;else fO++;}
-    let aT=0,aE=0,totalKm=0,totalTrips=0;const sucCount={};
-    for(const[,tr]of tractoIdx.entries()){const rec=tr.filter(t=>t._date>=cutoff);if(rec.length>0){aT++;totalKm+=rec.reduce((s,t)=>s+(Number(t.Kilometro)||0),0);totalTrips+=rec.length;}}
-    for(const[,tr]of ramplaIdx.entries()){if(tr.some(t=>t._date>=cutoff))aE++;const last=tr[0];const sc=getSucursal(last.Destino);sucCount[sc]=(sucCount[sc]||0)+1;}
-    const tKm=[];for(const[k,tr]of tractoIdx.entries()){const km=tr.filter(t=>t._date>=cutoff).reduce((s,t)=>s+(Number(t.Kilometro)||0),0);if(km>0)tKm.push([k,km]);}tKm.sort((a,b)=>b[1]-a[1]);
-    return{fT,fE,fO,aT,aE,totalKm,totalTrips,sucCount,uT:fT?((aT/fT)*100).toFixed(1):0,uE:fE?((aE/fE)*100).toFixed(1):0,topT:tKm.slice(0,10),totalR:ramplaIdx.size};
-  },[data,tractoIdx,ramplaIdx,flota,today,days]);
+
+    // Contar flota por categoría (denominadores correctos)
+    let fT=0,fE=0,fO=0;
+    const flotaTractos=new Set();
+    const flotaEquipos=new Set();
+    for(const[pat,v]of flota.entries()){
+      const c=getCategoria(v.tipoequipo);
+      if(c==="TRACTOCAMION"){fT++;flotaTractos.add(pat);}
+      else if(c==="EQUIPO"){fE++;flotaEquipos.add(pat);}
+      else fO++;
+    }
+
+    // Numeradores: cuántos de ESOS equipos (del catálogo) tuvieron viaje en el período
+    // Usando historial CSV viajes O ultimos_viajes
+    let aT=0,aE=0;
+    let totalKm=0,totalTrips=0;
+    const sucCount={};
+
+    // Para cada tracto en catálogo, buscar su última fecha
+    for(const pat of flotaTractos){
+      const tr=tractoIdx.get(pat);
+      let lastDate=null;
+      if(tr&&tr.length>0){
+        // tiene historial CSV
+        const recent=tr.filter(t=>t._date>=cutoff);
+        if(recent.length>0){
+          aT++;
+          totalKm+=recent.reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
+          totalTrips+=recent.length;
+        }
+        lastDate=tr[0]._date;
+      } else {
+        // sin historial CSV, revisar ultimos_viajes
+        const u=ultimosMap.get(pat);
+        if(u&&u._date>=cutoff){aT++;}
+        if(u)lastDate=u._date;
+      }
+    }
+
+    // Para cada equipo/rampla en catálogo
+    for(const pat of flotaEquipos){
+      const tr=ramplaIdx.get(pat);
+      let lastDate=null;
+      if(tr&&tr.length>0){
+        const recent=tr.filter(t=>t._date>=cutoff);
+        if(recent.length>0)aE++;
+        lastDate=tr[0]._date;
+        const last=tr[0];
+        const sc=getSucursal(last.Destino);
+        sucCount[sc]=(sucCount[sc]||0)+1;
+      } else {
+        const u=ultimosMap.get(pat);
+        if(u&&u._date>=cutoff)aE++;
+        if(u){
+          lastDate=u._date;
+          const sc=getSucursal(u.Destino||"");
+          sucCount[sc]=(sucCount[sc]||0)+1;
+        }
+      }
+    }
+
+    // Km totales del período (de CSV viajes, todos los tractos con viaje en período)
+    for(const[,tr]of tractoIdx.entries()){
+      const recent=tr.filter(t=>t._date>=cutoff);
+      if(!flotaTractos.has([...tractoIdx.entries()].find(([k,v])=>v===tr)?.[0])){
+        // tracto con viajes pero no en catálogo — sumar km igualmente
+        totalKm+=recent.reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
+        totalTrips+=recent.length;
+      }
+    }
+
+    const tKm=[];
+    for(const[k,tr]of tractoIdx.entries()){
+      const km=tr.filter(t=>t._date>=cutoff).reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
+      if(km>0)tKm.push([k,km]);
+    }
+    tKm.sort((a,b)=>b[1]-a[1]);
+
+    return{
+      fT,fE,fO,aT,aE,totalKm,totalTrips,sucCount,
+      uT:fT?Math.min(100,(aT/fT*100)).toFixed(1):0,
+      uE:fE?Math.min(100,(aE/fE*100)).toFixed(1):0,
+      uTraw:fT?(aT/fT*100).toFixed(1):0,
+      uEraw:fE?(aE/fE*100).toFixed(1):0,
+      topT:tKm.slice(0,10),
+      totalR:flotaEquipos.size,
+    };
+  },[data,tractoIdx,ramplaIdx,flota,ultimosMap,today,days]);
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}}>
@@ -240,25 +357,36 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,today,T}){
       </select>
     </div>
     <div style={card}>
-      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"16px",color:T.tx}}>📈 Utilización de Flota (últimos {days} días)</div>
+      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"4px",color:T.tx}}>📈 Utilización de Flota (últimos {days} días)</div>
+      <div style={{fontSize:"11px",color:T.txM,marginBottom:"16px"}}>
+        Base: equipos registrados en catálogo de flota · La barra muestra hasta 100% · El % real puede superar 100% si hay subcontratos o equipos no catalogados
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"24px"}}>
         <div>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px"}}>
             <span style={{color:T.tx}}>🚛 Tractocamiones</span>
-            <span style={{fontWeight:700,color:T.ac}}>{stats.aT+" / "+stats.fT+" ("+stats.uT+"%)"}</span>
+            <span style={{fontWeight:700,color:T.ac}}>
+              {stats.aT+" / "+stats.fT}
+              <span style={{color:stats.uTraw>100?T.red:T.grn,marginLeft:4}}>({stats.uTraw}%)</span>
+            </span>
           </div>
           <div style={{height:"12px",background:T.sf2,borderRadius:"6px",overflow:"hidden",border:`1px solid ${T.bd}`}}>
             <div style={{height:"100%",width:stats.uT+"%",background:`linear-gradient(90deg,${T.grn},${T.ac})`,borderRadius:"6px"}}/>
           </div>
+          {stats.uTraw>100&&<div style={{fontSize:"10px",color:T.txM,marginTop:3}}>⚠ Numerador incluye patentes fuera del catálogo de flota</div>}
         </div>
         <div>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px"}}>
             <span style={{color:T.tx}}>🚃 Equipos</span>
-            <span style={{fontWeight:700,color:T.ac}}>{stats.aE+" / "+stats.fE+" ("+stats.uE+"%)"}</span>
+            <span style={{fontWeight:700,color:T.ac}}>
+              {stats.aE+" / "+stats.fE}
+              <span style={{color:stats.uEraw>100?T.red:T.grn,marginLeft:4}}>({stats.uEraw}%)</span>
+            </span>
           </div>
           <div style={{height:"12px",background:T.sf2,borderRadius:"6px",overflow:"hidden",border:`1px solid ${T.bd}`}}>
             <div style={{height:"100%",width:stats.uE+"%",background:`linear-gradient(90deg,${T.blu},${T.ac})`,borderRadius:"6px"}}/>
           </div>
+          {stats.uEraw>100&&<div style={{fontSize:"10px",color:T.txM,marginTop:3}}>⚠ Numerador incluye patentes fuera del catálogo de flota</div>}
         </div>
       </div>
     </div>
@@ -302,55 +430,153 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,today,T}){
 }
 
 // ═══ VIEW 3: INACTIVOS ═══
-function Inactivos({tractoIdx,ramplaIdx,flota,today,T}){
-  const[th,setTh]=useState(30);const[tipo,setTipo]=useState("rampla");
+// CRITERIO UNIFICADO:
+// ACTIVO   ≤ 30 días sin viaje
+// INACTIVO 31-90 días sin viaje
+// PARADO   > 90 días sin viaje
+// SIN VIAJES: en catálogo pero sin ningún registro histórico
+// La fuente de "último viaje" puede ser CSV viajes O ultimos_viajes (el que sea más reciente)
+function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
+  const[tipo,setTipo]=useState("rampla");
+
+  const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
+  const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
-  const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
-  const tth={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
+  const badge=(c)=>({display:"inline-block",padding:"2px 8px",borderRadius:"4px",fontSize:"11px",fontWeight:600,background:`${c}22`,color:c,border:`1px solid ${c}44`});
 
-  const inactive=useMemo(()=>{
-    const idx=tipo==="tracto"?tractoIdx:ramplaIdx;const res=[];
-    for(const[k,tr]of idx.entries()){const last=tr[0];const d=daysBetween(last._date,today);if(d>=th){const fi=flota.get(k);res.push({pat:k,days:d,last,suc:getSucursal(last.Destino),fi});}}
-    return res.sort((a,b)=>b.days-a.days);
-  },[tractoIdx,ramplaIdx,flota,today,th,tipo]);
+  // Construir lista completa con estado correcto
+  const allEquipos = useMemo(()=>{
+    const idx = tipo==="tracto" ? tractoIdx : ramplaIdx;
+    const res = [];
 
-  const bySuc=useMemo(()=>{const m={};inactive.forEach(r=>{m[r.suc]=(m[r.suc]||0)+1;});return Object.entries(m).sort((a,b)=>b[1]-a[1]);},[inactive]);
+    // 1. Equipos que están en catálogo de flota
+    for(const[pat,fi] of flota.entries()){
+      const cat = getCategoria(fi.tipoequipo);
+      if(tipo==="tracto" && cat!=="TRACTOCAMION") continue;
+      if(tipo==="rampla" && cat!=="EQUIPO") continue;
+
+      const tr = idx.get(pat);
+      let lastDate = null, lastRecord = null;
+
+      if(tr && tr.length > 0){
+        lastDate = tr[0]._date;
+        lastRecord = tr[0];
+      }
+
+      // Complementar con ultimos_viajes si es más reciente
+      const u = ultimosMap.get(pat);
+      if(u && (!lastDate || u._date > lastDate)){
+        lastDate = u._date;
+        lastRecord = { Fecha: formatDate(u._date), Destino: u.Destino, Origen: u.Origen, Cliente: u.Cliente, Tracto: pat, Rampla: pat, _fromUltimos: true };
+      }
+
+      const days = lastDate ? daysBetween(lastDate, today) : null;
+      const estado = getEstadoEquipo(days);
+
+      res.push({ pat, days, lastRecord, suc: lastRecord ? getSucursal(lastRecord.Destino) : "OTROS", fi, estado, enCatalogo: true });
+    }
+
+    // 2. Equipos que tienen viajes pero NO están en catálogo (subcontratos, etc.)
+    for(const[pat,tr] of idx.entries()){
+      if(flota.has(pat)) continue; // ya procesado
+      const lastDate = tr[0]._date;
+      const days = daysBetween(lastDate, today);
+      const estado = getEstadoEquipo(days);
+      const last = tr[0];
+      res.push({ pat, days, lastRecord: last, suc: getSucursal(last.Destino), fi: null, estado, enCatalogo: false });
+    }
+
+    return res;
+  },[tractoIdx, ramplaIdx, flota, ultimosMap, today, tipo]);
+
+  const cols = [
+    {key:"pat", label:"Patente"},
+    {key:"days", label:"Días inactivo"},
+    {key:"lastRecord.Fecha", label:"Último Mov."},
+    {key:"suc", label:"Sucursal"},
+    {key:"estado", label:"Estado"},
+    {key:"enCatalogo", label:"Catálogo"},
+    {key:"fi.tipoequipo", label:"Tipo Equipo"},
+  ];
+
+  const flatData = useMemo(()=>allEquipos.map(r=>({
+    ...r,
+    "lastRecord.Fecha": r.lastRecord?.Fecha || "",
+    "fi.tipoequipo": r.fi?.tipoequipo || "",
+  })),[allEquipos]);
+
+  const {sorted, sortKey, sortDir, toggle} = useSortable(flatData, "days", "desc");
+
+  // Contar por estado
+  const estadoCount = useMemo(()=>{
+    const m={ACTIVO:0,INACTIVO:0,PARADO:0,"SIN VIAJES":0};
+    allEquipos.forEach(r=>{ m[r.estado]=(m[r.estado]||0)+1; });
+    return m;
+  },[allEquipos]);
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
-      <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⚠️ Equipos Inactivos</h2>
-      <div style={{display:"flex",gap:"8px"}}>
-        <select value={tipo} onChange={e=>setTipo(e.target.value)} style={sel}><option value="rampla">Ramplas/Equipos</option><option value="tracto">Tractos</option></select>
-        <select value={th} onChange={e=>setTh(+e.target.value)} style={sel}><option value={7}>+7d</option><option value={15}>+15d</option><option value={30}>+30d</option><option value={60}>+60d</option><option value={90}>+90d</option><option value={180}>+180d</option><option value={365}>+1 año</option></select>
-      </div>
+      <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⚠️ Estado de Equipos</h2>
+      <select value={tipo} onChange={e=>setTipo(e.target.value)} style={sel}>
+        <option value="rampla">Ramplas / Equipos</option>
+        <option value="tracto">Tractocamiones</option>
+      </select>
     </div>
-    <div style={{display:"flex",gap:"16px",flexWrap:"wrap",marginBottom:"16px"}}>
-      <StatCard T={T} icon="🔴" value={inactive.length} label={"Inactivos +"+th+"d"} color={T.red}/>
-      {bySuc.slice(0,3).map(([sc,c])=>(<StatCard key={sc} T={T} icon={<SucBadge s={sc} T={T}/>} value={c} label={"En "+sc} color={T.sucColors[sc]?.accent||"#666"}/>))}
+
+    {/* Leyenda de criterios */}
+    <div style={{background:T.sf2,border:`1px solid ${T.bd}`,borderRadius:"10px",padding:"12px 16px",marginBottom:"16px",fontSize:"11px",color:T.txM}}>
+      <strong style={{color:T.tx}}>Criterio de clasificación:</strong>
+      {" "}<span style={{color:T.grn}}>●</span> ACTIVO: último viaje hace ≤ 30 días
+      {" · "}<span style={{color:T.ac}}>●</span> INACTIVO: 31–90 días
+      {" · "}<span style={{color:T.red}}>●</span> PARADO: {"> "}90 días
+      {" · "}<span style={{color:T.txM}}>●</span> SIN VIAJES: sin registro histórico
+      {" · Fuente: historial CSV viajes + archivo Últimos Viajes (equipos pre-2024)"}
     </div>
+
+    <div style={{display:"flex",gap:"12px",flexWrap:"wrap",marginBottom:"16px"}}>
+      <StatCard T={T} icon="✅" value={estadoCount.ACTIVO} label="Activos (≤30d)" color={T.grn}/>
+      <StatCard T={T} icon="🟡" value={estadoCount.INACTIVO} label="Inactivos (31-90d)" color={T.ac}/>
+      <StatCard T={T} icon="🔴" value={estadoCount.PARADO} label="Parados (+90d)" color={T.red}/>
+      <StatCard T={T} icon="⚪" value={estadoCount["SIN VIAJES"]} label="Sin viajes" color={T.txM}/>
+    </div>
+
     <div style={card}>
-      <div style={{maxHeight:"500px",overflowY:"auto",overflowX:"auto"}}>
+      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>
+        {sorted.length.toLocaleString("es-CL")} equipos · Click en columna para ordenar
+      </div>
+      <div style={{maxHeight:"600px",overflowY:"auto",overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
           <thead><tr>
-            <th style={tth}>Patente</th><th style={tth}>Días</th><th style={tth}>Último Mov.</th>
-            <th style={tth}>Último Destino</th><th style={tth}>Sucursal</th>
-            <th style={tth}>Pareado</th><th style={tth}>Cliente</th><th style={tth}>Tipo Equipo</th>
+            <SortTh label="Patente" col="pat" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Días" col="days" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Último Mov." col="lastRecord.Fecha" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <th style={thStyle}>Destino</th>
+            <SortTh label="Sucursal" col="suc" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Estado" col="estado" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <th style={thStyle}>{tipo==="tracto"?"Rampla":"Tracto"}</th>
+            <th style={thStyle}>Cliente</th>
+            <SortTh label="Tipo Equipo" col="fi.tipoequipo" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="En Catálogo" col="enCatalogo" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
           </tr></thead>
-          <tbody>{inactive.slice(0,100).map((r,i)=>(
-            <tr key={r.pat} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
+          <tbody>{sorted.slice(0,150).map((r,i)=>{
+            const ec = ESTADO_COLOR(r.estado, T);
+            return(<tr key={r.pat} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
               <td style={{...td,fontWeight:700}}>{r.pat}</td>
-              <td style={{...td,color:r.days>90?T.red:T.ac,fontWeight:600}}>{r.days}d</td>
-              <td style={td}>{r.last.Fecha}</td><td style={td}>{r.last.Destino}</td>
+              <td style={{...td,color:ec,fontWeight:600}}>{r.days !== null ? r.days+"d" : "—"}</td>
+              <td style={td}>{r.lastRecord?.Fecha||"—"}</td>
+              <td style={td}>{r.lastRecord?.Destino||"—"}</td>
               <td style={td}><SucBadge s={r.suc} T={T}/></td>
-              <td style={td}>{tipo==="tracto"?r.last.Rampla:r.last.Tracto}</td>
-              <td style={td}>{r.last.Cliente}</td>
-              <td style={td}>{r.fi?.tipoequipo||"-"}</td>
-            </tr>
-          ))}</tbody>
+              <td style={td}><span style={badge(ec)}>{r.estado}</span></td>
+              <td style={td}>{tipo==="tracto"?r.lastRecord?.Rampla:r.lastRecord?.Tracto}</td>
+              <td style={td}>{r.lastRecord?.Cliente||"—"}</td>
+              <td style={td}>{r.fi?.tipoequipo||"—"}</td>
+              <td style={td}><span style={badge(r.enCatalogo?T.grn:T.txM)}>{r.enCatalogo?"Sí":"No"}</span></td>
+            </tr>);
+          })}</tbody>
         </table>
       </div>
-      {inactive.length>100&&<div style={{textAlign:"center",padding:"8px",color:T.txM,fontSize:"11px"}}>Mostrando 100 de {inactive.length}</div>}
+      {sorted.length>150&&<div style={{textAlign:"center",padding:"8px",color:T.txM,fontSize:"11px"}}>Mostrando 150 de {sorted.length}</div>}
     </div>
   </div>);
 }
@@ -361,31 +587,37 @@ function StatsCliente({data,today,T}){
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
-  const th={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
+  const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
 
-  const stats=useMemo(()=>{
+  const rawStats=useMemo(()=>{
     const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
     const filtered=months===99?data:data.filter(d=>d._date>=cutoff);const byC={};
     filtered.forEach(d=>{const c=d.Cliente;if(!byC[c])byC[c]={cliente:c,km:0,tramos:0,sols:new Set(),cargas:{}};byC[c].km+=Number(d.Kilometro)||0;byC[c].tramos++;if(d.Solicitud)byC[c].sols.add(d.Solicitud);const cg=d.Carga?.trim();if(cg&&!/^\d+$/.test(cg))byC[c].cargas[cg]=(byC[c].cargas[cg]||0)+1;});
-    let res=Object.values(byC).map(c=>({...c,sols:c.sols.size,topCargas:Object.entries(c.cargas).sort((a,b)=>b[1]-a[1]).slice(0,3)}));
-    if(sortBy==="km")res.sort((a,b)=>b.km-a.km);else if(sortBy==="tramos")res.sort((a,b)=>b.tramos-a.tramos);else if(sortBy==="sols")res.sort((a,b)=>b.sols-a.sols);else res.sort((a,b)=>a.cliente.localeCompare(b.cliente));
-    return res;
-  },[data,today,months,sortBy]);
-  const totalKm=stats.reduce((s,c)=>s+c.km,0);
+    return Object.values(byC).map(c=>({...c,sols:c.sols.size,topCargas:Object.entries(c.cargas).sort((a,b)=>b[1]-a[1]).slice(0,3)}));
+  },[data,today,months]);
+
+  const{sorted,sortKey,sortDir,toggle}=useSortable(rawStats,sortBy,"desc");
+  const totalKm=rawStats.reduce((s,c)=>s+c.km,0);
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
       <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>🏢 Estadísticas por Cliente</h2>
-      <div style={{display:"flex",gap:"8px"}}>
-        <select value={months} onChange={e=>setMonths(+e.target.value)} style={sel}><option value={1}>1 mes</option><option value={2}>2 meses</option><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>1 año</option><option value={99}>Todo</option></select>
-        <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={sel}><option value="km">Por KM</option><option value="tramos">Por Tramos</option><option value="sols">Por Solicitudes</option><option value="nombre">A-Z</option></select>
-      </div>
+      <select value={months} onChange={e=>setMonths(+e.target.value)} style={sel}><option value={1}>1 mes</option><option value={2}>2 meses</option><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>1 año</option><option value={99}>Todo</option></select>
     </div>
     <div style={card}>
+      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar</div>
       <div style={{maxHeight:"500px",overflowY:"auto",overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
-          <thead><tr><th style={th}>#</th><th style={th}>Cliente</th><th style={th}>KM Total</th><th style={th}>%</th><th style={th}>Tramos</th><th style={th}>Solicitudes</th><th style={th}>Cargas Ppales.</th></tr></thead>
-          <tbody>{stats.map((c,i)=>(
+          <thead><tr>
+            <th style={thStyle}>#</th>
+            <SortTh label="Cliente" col="cliente" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="KM Total" col="km" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <th style={thStyle}>%</th>
+            <SortTh label="Tramos" col="tramos" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Solicitudes" col="sols" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <th style={thStyle}>Cargas Ppales.</th>
+          </tr></thead>
+          <tbody>{sorted.map((c,i)=>(
             <tr key={c.cliente} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
               <td style={td}>{i+1}</td>
               <td style={{...td,fontWeight:600,maxWidth:"250px",overflow:"hidden",textOverflow:"ellipsis"}}>{c.cliente}</td>
@@ -415,14 +647,16 @@ function StatsRuta({data,today,T}){
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
-  const th={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
+  const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
 
-  const stats=useMemo(()=>{
+  const rawStats=useMemo(()=>{
     const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
     const filtered=months===99?data:data.filter(d=>d._date>=cutoff);const byR={};
     filtered.forEach(d=>{const k=d.Origen+" → "+d.Destino;if(!byR[k])byR[k]={ruta:k,o:d.Origen,d:d.Destino,km:0,count:0,cls:new Set(),cargas:{}};byR[k].km+=Number(d.Kilometro)||0;byR[k].count++;byR[k].cls.add(d.Cliente);const cg=d.Carga?.trim();if(cg&&!/^\d+$/.test(cg))byR[k].cargas[cg]=(byR[k].cargas[cg]||0)+1;});
-    return Object.values(byR).filter(r=>r.count>=minTrips).map(r=>({...r,avg:Math.round(r.km/r.count),cls:r.cls.size,topCarga:Object.entries(r.cargas).sort((a,b)=>b[1]-a[1])[0]?.[0]||"-"})).sort((a,b)=>b.count-a.count);
+    return Object.values(byR).filter(r=>r.count>=minTrips).map(r=>({...r,avg:Math.round(r.km/r.count),cls:r.cls.size,topCarga:Object.entries(r.cargas).sort((a,b)=>b[1]-a[1])[0]?.[0]||"-"}));
   },[data,today,months,minTrips]);
+
+  const{sorted,sortKey,sortDir,toggle}=useSortable(rawStats,"count","desc");
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
@@ -433,10 +667,20 @@ function StatsRuta({data,today,T}){
       </div>
     </div>
     <div style={card}>
+      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar</div>
       <div style={{maxHeight:"500px",overflowY:"auto",overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
-          <thead><tr><th style={th}>#</th><th style={th}>Ruta</th><th style={th}>Sucursal O-D</th><th style={th}>Viajes</th><th style={th}>KM Total</th><th style={th}>KM Prom.</th><th style={th}>Clientes</th><th style={th}>Carga Ppal.</th></tr></thead>
-          <tbody>{stats.slice(0,80).map((r,i)=>(
+          <thead><tr>
+            <th style={thStyle}>#</th>
+            <SortTh label="Ruta" col="ruta" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <th style={thStyle}>Suc. O-D</th>
+            <SortTh label="Viajes" col="count" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="KM Total" col="km" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="KM Prom." col="avg" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Clientes" col="cls" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <th style={thStyle}>Carga Ppal.</th>
+          </tr></thead>
+          <tbody>{sorted.slice(0,80).map((r,i)=>(
             <tr key={r.ruta} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
               <td style={td}>{i+1}</td>
               <td style={{...td,fontWeight:600}}>{r.ruta}</td>
@@ -460,7 +704,7 @@ function Detalle({data,T}){
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const input={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"10px 14px",color:T.tx,fontSize:"14px",fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box"};
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
-  const th={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
+  const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
 
   const cls=useMemo(()=>[...new Set(data.map(d=>d.Cliente))].sort(),[data]);
   const cgs=useMemo(()=>[...new Set(data.map(d=>d.Carga?.trim()).filter(c=>c&&!/^\d+$/.test(c)))].sort(),[data]);
@@ -468,7 +712,9 @@ function Detalle({data,T}){
     if(cl)f=f.filter(r=>r.Cliente===cl);if(tr)f=f.filter(r=>r.Tracto?.toUpperCase().includes(tr.toUpperCase()));if(ra)f=f.filter(r=>r.Rampla?.toUpperCase().includes(ra.toUpperCase()));
     if(or)f=f.filter(r=>r.Origen?.toUpperCase().includes(or.toUpperCase()));if(de)f=f.filter(r=>r.Destino?.toUpperCase().includes(de.toUpperCase()));if(cg)f=f.filter(r=>r.Carga===cg);return f;
   },[data,fd,fh,cl,tr,ra,or,de,cg]);
-  const totalP=Math.ceil(filtered.length/pp);const pd=filtered.slice((pg-1)*pp,pg*pp);
+
+  const{sorted,sortKey,sortDir,toggle}=useSortable(filtered,"_date","desc");
+  const totalP=Math.ceil(sorted.length/pp);const pd=sorted.slice((pg-1)*pp,pg*pp);
   const totalKm=useMemo(()=>filtered.reduce((s,d)=>s+(Number(d.Kilometro)||0),0),[filtered]);
   useEffect(()=>setPg(1),[fd,fh,cl,tr,ra,or,de,cg]);
 
@@ -492,9 +738,20 @@ function Detalle({data,T}){
       <div style={{display:"inline-flex",alignItems:"center",gap:"4px",padding:"5px 12px",borderRadius:"20px",fontSize:"12px",fontWeight:600,background:"rgba(59,130,246,0.1)",color:T.blu,border:`1px solid ${T.blu}44`}}>{new Set(filtered.map(d=>d.Solicitud)).size.toLocaleString("es-CL")} solicitudes</div>
     </div>
     <div style={card}>
+      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar</div>
       <div style={{maxHeight:"500px",overflowY:"auto",overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
-          <thead><tr><th style={th}>Fecha</th><th style={th}>Solicitud</th><th style={th}>Cliente</th><th style={th}>Tracto</th><th style={th}>Rampla</th><th style={th}>Origen</th><th style={th}>Destino</th><th style={th}>KM</th><th style={th}>Carga</th></tr></thead>
+          <thead><tr>
+            <SortTh label="Fecha" col="_date" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <th style={thStyle}>Solicitud</th>
+            <SortTh label="Cliente" col="Cliente" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Tracto" col="Tracto" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Rampla" col="Rampla" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Origen" col="Origen" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Destino" col="Destino" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="KM" col="Kilometro" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <th style={thStyle}>Carga</th>
+          </tr></thead>
           <tbody>{pd.map((d,i)=>(
             <tr key={d.Expedicion+"-"+i} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
               <td style={td}>{d.Fecha}</td><td style={td}>{d.Solicitud}</td>
@@ -513,44 +770,74 @@ function Detalle({data,T}){
 }
 
 // ═══ VIEW 7: INVENTARIO DE FLOTA ═══
-function Inventario({flota,tractoIdx,ramplaIdx,today,T}){
+function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
   const[filtTipo,setFiltTipo]=useState("");const[filtYear,setFiltYear]=useState("");const[filtMarca,setFiltMarca]=useState("");const[filtCat,setFiltCat]=useState("");const[filtEstado,setFiltEstado]=useState("");const[pg,setPg]=useState(1);const pp=50;
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const input={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"9px 12px",color:T.tx,fontSize:"13px",fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box"};
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
-  const th={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
+  const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
   const badge=(c)=>({display:"inline-block",padding:"2px 8px",borderRadius:"4px",fontSize:"11px",fontWeight:600,background:`${c}22`,color:c,border:`1px solid ${c}44`});
 
-  const flotaArr=useMemo(()=>{const arr=[];for(const[pat,v]of flota.entries()){const cat=getCategoria(v.tipoequipo);const tramos=tractoIdx.get(pat)||ramplaIdx.get(pat);const lastTrip=tramos?tramos[0]:null;
-    const daysI=lastTrip?daysBetween(lastTrip._date,today):9999;const age=v.fecha?(today.getFullYear()-parseInt(v.fecha)):null;
-    arr.push({pat,...v,cat,lastTrip,daysI,age,estado:daysI<=30?"ACTIVO":daysI<=90?"INACTIVO":daysI===9999?"SIN VIAJES":"PARADO"});}return arr;
-  },[flota,tractoIdx,ramplaIdx,today]);
+  const flotaArr=useMemo(()=>{const arr=[];
+    for(const[pat,v]of flota.entries()){
+      const cat=getCategoria(v.tipoequipo);
+      // Buscar último viaje: primero en CSV, luego en ultimosMap
+      const tramos=tractoIdx.get(pat)||ramplaIdx.get(pat);
+      let lastTrip=tramos?tramos[0]:null;
+      let lastDate=lastTrip?lastTrip._date:null;
+
+      const u=ultimosMap.get(pat);
+      if(u&&(!lastDate||u._date>lastDate)){
+        lastDate=u._date;
+        lastTrip={Fecha:formatDate(u._date),Destino:u.Destino,Origen:u.Origen,Cliente:u.Cliente,_fromUltimos:true};
+      }
+
+      const daysI=lastDate?daysBetween(lastDate,today):null;
+      const age=v.fecha?(today.getFullYear()-parseInt(v.fecha)):null;
+      const estado=getEstadoEquipo(daysI);
+      arr.push({pat,...v,cat,lastTrip,daysI,age,estado});
+    }
+    return arr;
+  },[flota,tractoIdx,ramplaIdx,ultimosMap,today]);
+
   const tipos=useMemo(()=>[...new Set(flotaArr.map(f=>f.tipoequipo))].sort(),[flotaArr]);
   const years=useMemo(()=>[...new Set(flotaArr.map(f=>f.fecha).filter(Boolean))].sort(),[flotaArr]);
   const marcas=useMemo(()=>[...new Set(flotaArr.map(f=>f.marca).filter(Boolean))].sort(),[flotaArr]);
   const filtered=useMemo(()=>{let f=flotaArr;if(filtTipo)f=f.filter(r=>r.tipoequipo===filtTipo);if(filtYear)f=f.filter(r=>r.fecha===filtYear);if(filtMarca)f=f.filter(r=>r.marca===filtMarca);if(filtCat)f=f.filter(r=>r.cat===filtCat);if(filtEstado)f=f.filter(r=>r.estado===filtEstado);return f;},[flotaArr,filtTipo,filtYear,filtMarca,filtCat,filtEstado]);
   useEffect(()=>setPg(1),[filtTipo,filtYear,filtMarca,filtCat,filtEstado]);
-  const totalP=Math.ceil(filtered.length/pp);const pd=filtered.slice((pg-1)*pp,pg*pp);
+
+  const{sorted,sortKey,sortDir,toggle}=useSortable(filtered,"daysI","desc");
+  const totalP=Math.ceil(sorted.length/pp);const pd=sorted.slice((pg-1)*pp,pg*pp);
+
   const summary=useMemo(()=>{const byYear={};const byEstado={};let totalAge=0,ageCount=0;
     filtered.forEach(f=>{if(f.fecha)byYear[f.fecha]=(byYear[f.fecha]||0)+1;byEstado[f.estado]=(byEstado[f.estado]||0)+1;if(f.age!==null){totalAge+=f.age;ageCount++;}});
     return{byYear:Object.entries(byYear).sort((a,b)=>a[0].localeCompare(b[0])),byEstado,avgAge:ageCount?(totalAge/ageCount).toFixed(1):"-"};},[filtered]);
 
   return(<div>
     <h2 style={{margin:"0 0 16px",fontSize:"16px",color:T.tx}}>🏗️ Inventario de Flota</h2>
+    <div style={{background:T.sf2,border:`1px solid ${T.bd}`,borderRadius:"10px",padding:"10px 16px",marginBottom:"12px",fontSize:"11px",color:T.txM}}>
+      <strong style={{color:T.tx}}>Criterio estado:</strong>
+      {" "}<span style={{color:T.grn}}>● ACTIVO</span> ≤30d sin viaje
+      {" · "}<span style={{color:T.ac}}>● INACTIVO</span> 31–90d
+      {" · "}<span style={{color:T.red}}>● PARADO</span> +90d
+      {" · "}<span style={{color:T.txM}}>● SIN VIAJES</span> sin historial
+      {" · Incluye historial de Últimos Viajes para equipos pre-2024"}
+    </div>
     <div style={card}>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:"8px"}}>
         <div><label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>CATEGORÍA</label><select value={filtCat} onChange={e=>setFiltCat(e.target.value)} style={input}><option value="">Todas</option><option value="TRACTOCAMION">Tractocamiones</option><option value="EQUIPO">Equipos</option><option value="OTRO">Otros</option></select></div>
         <div><label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>TIPO EQUIPO</label><select value={filtTipo} onChange={e=>setFiltTipo(e.target.value)} style={input}><option value="">Todos</option>{tipos.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
         <div><label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>AÑO</label><select value={filtYear} onChange={e=>setFiltYear(e.target.value)} style={input}><option value="">Todos</option>{years.map(y=><option key={y} value={y}>{y}</option>)}</select></div>
         <div><label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>MARCA</label><select value={filtMarca} onChange={e=>setFiltMarca(e.target.value)} style={input}><option value="">Todas</option>{marcas.map(m=><option key={m} value={m}>{m}</option>)}</select></div>
-        <div><label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>ESTADO</label><select value={filtEstado} onChange={e=>setFiltEstado(e.target.value)} style={input}><option value="">Todos</option><option value="ACTIVO">Activo</option><option value="INACTIVO">Inactivo (31-90d)</option><option value="PARADO">Parado (+90d)</option><option value="SIN VIAJES">Sin viajes</option></select></div>
+        <div><label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>ESTADO</label><select value={filtEstado} onChange={e=>setFiltEstado(e.target.value)} style={input}><option value="">Todos</option><option value="ACTIVO">Activo (≤30d)</option><option value="INACTIVO">Inactivo (31-90d)</option><option value="PARADO">Parado (+90d)</option><option value="SIN VIAJES">Sin viajes</option></select></div>
       </div>
     </div>
     <div style={{display:"flex",gap:"16px",flexWrap:"wrap",marginBottom:"16px"}}>
       <StatCard T={T} icon="📦" value={filtered.length} label="Equipos" color={T.ac}/>
       <StatCard T={T} icon="📅" value={summary.avgAge+" años"} label="Antigüedad Promedio" color={T.blu}/>
-      <StatCard T={T} icon="✅" value={summary.byEstado["ACTIVO"]||0} label="Activos" color={T.grn}/>
-      <StatCard T={T} icon="⏸️" value={(summary.byEstado["INACTIVO"]||0)+(summary.byEstado["PARADO"]||0)} label="Inactivos/Parados" color={T.red}/>
+      <StatCard T={T} icon="✅" value={summary.byEstado["ACTIVO"]||0} label="Activos (≤30d)" color={T.grn}/>
+      <StatCard T={T} icon="⏸️" value={(summary.byEstado["INACTIVO"]||0)} label="Inactivos (31-90d)" color={T.ac}/>
+      <StatCard T={T} icon="🛑" value={(summary.byEstado["PARADO"]||0)} label="Parados (+90d)" color={T.red}/>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px",marginBottom:"16px"}}>
       <div style={card}>
@@ -582,17 +869,32 @@ function Inventario({flota,tractoIdx,ramplaIdx,today,T}){
       </div>
     </div>
     <div style={card}>
+      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar · {sorted.length} equipos</div>
       <div style={{maxHeight:"500px",overflowY:"auto",overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
-          <thead><tr><th style={th}>Patente</th><th style={th}>Categoría</th><th style={th}>Tipo</th><th style={th}>Marca</th><th style={th}>Modelo</th><th style={th}>Año</th><th style={th}>Antigüedad</th><th style={th}>Estado</th><th style={th}>Último Destino</th><th style={th}>Última Fecha</th></tr></thead>
-          <tbody>{pd.map((f,i)=>{const ec=f.estado==="ACTIVO"?T.grn:f.estado==="INACTIVO"?T.ac:f.estado==="PARADO"?T.red:T.txM;return(
+          <thead><tr>
+            <SortTh label="Patente" col="pat" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Categoría" col="cat" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Tipo" col="tipoequipo" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Marca" col="marca" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Modelo" col="modelo" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Año" col="fecha" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Antigüedad" col="age" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Estado" col="estado" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Días" col="daysI" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <th style={thStyle}>Último Destino</th>
+            <SortTh label="Última Fecha" col="lastTrip.Fecha" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+          </tr></thead>
+          <tbody>{pd.map((f,i)=>{const ec=ESTADO_COLOR(f.estado,T);return(
             <tr key={f.pat} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
               <td style={{...td,fontWeight:700}}>{f.pat}</td>
               <td style={td}><span style={badge(f.cat==="TRACTOCAMION"?T.blu:f.cat==="EQUIPO"?T.ac:T.txM)}>{f.cat}</span></td>
               <td style={td}>{f.tipoequipo}</td><td style={td}>{f.marca}</td><td style={td}>{f.modelo}</td><td style={td}>{f.fecha}</td>
               <td style={{...td,color:f.age>10?T.red:f.age>6?T.ac:T.grn,fontWeight:600}}>{f.age!==null?f.age+" años":"-"}</td>
               <td style={td}><span style={badge(ec)}>{f.estado}</span></td>
-              <td style={td}>{f.lastTrip?.Destino||"-"}</td><td style={td}>{f.lastTrip?.Fecha||"-"}</td>
+              <td style={{...td,color:ec,fontWeight:600}}>{f.daysI!==null?f.daysI+"d":"—"}</td>
+              <td style={td}>{f.lastTrip?.Destino||"-"}</td>
+              <td style={td}>{f.lastTrip?.Fecha||"-"}</td>
             </tr>
           );})}
           </tbody>
@@ -607,7 +909,7 @@ function Inventario({flota,tractoIdx,ramplaIdx,today,T}){
 const VIEWS=[
   {id:"buscar",label:"Buscador",icon:"🔍"},
   {id:"flota",label:"Estado Flota",icon:"📊"},
-  {id:"inactivos",label:"Inactivos",icon:"⚠️"},
+  {id:"inactivos",label:"Equipos",icon:"⚠️"},
   {id:"clientes",label:"Por Cliente",icon:"🏢"},
   {id:"rutas",label:"Por Ruta",icon:"🛤️"},
   {id:"detalle",label:"Detalle",icon:"📋"},
@@ -615,7 +917,7 @@ const VIEWS=[
 ];
 
 export default function App(){
-  const[data,setData]=useState([]);const[flota,setFlota]=useState(new Map());const[loading,setLoading]=useState(true);const[loadMsg,setLoadMsg]=useState("Conectando...");const[error,setError]=useState(null);const[view,setView]=useState("buscar");const[info,setInfo]=useState({});
+  const[data,setData]=useState([]);const[flota,setFlota]=useState(new Map());const[ultimosMap,setUltimosMap]=useState(new Map());const[loading,setLoading]=useState(true);const[loadMsg,setLoadMsg]=useState("Conectando...");const[error,setError]=useState(null);const[view,setView]=useState("buscar");const[info,setInfo]=useState({});
   const[darkMode,setDarkMode]=useState(()=>{
     try{const s=localStorage.getItem("tb_dark");return s===null?true:s==="true";}catch{return true;}
   });
@@ -623,11 +925,7 @@ export default function App(){
   const today=useMemo(()=>new Date(),[]);
 
   const toggleTheme=()=>{
-    setDarkMode(d=>{
-      const next=!d;
-      try{localStorage.setItem("tb_dark",String(next));}catch{}
-      return next;
-    });
+    setDarkMode(d=>{const next=!d;try{localStorage.setItem("tb_dark",String(next));}catch{}return next;});
   };
 
   const{tractoIdx,ramplaIdx}=useMemo(()=>{
@@ -639,19 +937,68 @@ export default function App(){
     return{tractoIdx:ti,ramplaIdx:ri};
   },[data]);
 
-  useEffect(()=>{let vd=null,fd=null;
-    const done=()=>{if(!vd||!fd)return;setLoadMsg("Indexando...");setTimeout(()=>{try{
-      let rows=vd.filter(r=>r.Cliente!=="-Viaje sin solicitud -");
-      rows=rows.map(r=>({...r,_date:parseDate(r.Fecha)})).filter(r=>r._date);
-      rows.sort((a,b)=>b._date-a._date||(b.Expedicion||"").localeCompare(a.Expedicion||""));
-      const maxD=rows.length?rows[0]._date:null;const minD=rows.length?rows[rows.length-1]._date:null;
-      const fm=new Map();fd.forEach(r=>{const pat=cleanPatente(r.patente);if(pat&&pat!=="AA1111"&&pat!=="AAA111")fm.set(pat,{marca:r.marca?.trim()||"",modelo:r.modelo?.trim()||"",fecha:r.fecha?.trim()||"",tipoequipo:r.tipoequipo?.trim()||""});});
-      setInfo({total:rows.length,minDate:minD?formatDate(minD):"-",maxDate:maxD?formatDate(maxD):"-",tractos:new Set(rows.map(r=>r.Tracto).filter(Boolean)).size,ramplas:new Set(rows.map(r=>r.Rampla).filter(Boolean)).size,clientes:new Set(rows.map(r=>r.Cliente).filter(Boolean)).size,flotaTotal:fm.size});
-      setData(rows);setFlota(fm);setLoading(false);
-    }catch(e){setError("Error: "+e.message);setLoading(false);}},100);};
+  useEffect(()=>{
+    let vd=null,fd=null,ud=null;
+    let ultimosReady=false; // se marca true cuando llega (o falla)
+
+    const tryFinalize=()=>{
+      // Necesitamos viajes + flota. Ultimos es opcional pero esperamos hasta 3s.
+      if(!vd||!fd)return;
+      // Si ultimos aún no llegó, esperamos un poco más (máx 3 intentos de 500ms)
+      if(!ultimosReady){
+        setTimeout(tryFinalize, 500);
+        return;
+      }
+
+      setLoadMsg("Indexando...");
+      setTimeout(()=>{
+        try{
+          let rows=vd.filter(r=>r.Cliente!=="-Viaje sin solicitud -");
+          rows=rows.map(r=>({...r,_date:parseDate(r.Fecha)})).filter(r=>r._date);
+          rows.sort((a,b)=>b._date-a._date||(b.Expedicion||"").localeCompare(a.Expedicion||""));
+          const maxD=rows.length?rows[0]._date:null;const minD=rows.length?rows[rows.length-1]._date:null;
+          const fm=new Map();
+          fd.forEach(r=>{const pat=cleanPatente(r.patente);if(pat&&pat!=="AA1111"&&pat!=="AAA111")fm.set(pat,{marca:r.marca?.trim()||"",modelo:r.modelo?.trim()||"",fecha:r.fecha?.trim()||"",tipoequipo:r.tipoequipo?.trim()||""});});
+
+          // Construir mapa ultimos_viajes
+          const um=new Map();
+          if(ud&&ud.length){
+            ud.forEach(r=>{
+              const pat=cleanPatente(r["Patente"]||r["patente"]);
+              if(!pat)return;
+              const rawDate=r["Ult. despacho"]||r["ult_despacho"]||r["Fecha"];
+              let d=null;
+              if(rawDate){
+                const iso=String(rawDate).match(/(\d{4})-(\d{2})-(\d{2})/);
+                if(iso)d=new Date(+iso[1],+iso[2]-1,+iso[3]);
+                else d=parseDate(rawDate);
+              }
+              if(!d)return;
+              const existing=um.get(pat);
+              if(!existing||d>existing._date){
+                um.set(pat,{_date:d,Origen:r["Origen"]||"",Destino:r["Destino"]||"",Cliente:r["Cliente"]||"",tipoequipo:r["Tipo equipo"]||""});
+              }
+            });
+          }
+
+          setInfo({total:rows.length,minDate:minD?formatDate(minD):"-",maxDate:maxD?formatDate(maxD):"-",tractos:new Set(rows.map(r=>r.Tracto).filter(Boolean)).size,ramplas:new Set(rows.map(r=>r.Rampla).filter(Boolean)).size,clientes:new Set(rows.map(r=>r.Cliente).filter(Boolean)).size,flotaTotal:fm.size,ultimosTotal:um.size});
+          setData(rows);setFlota(fm);setUltimosMap(um);setLoading(false);
+        }catch(e){setError("Error: "+e.message);setLoading(false);}
+      },100);
+    };
+
+    // Timeout máximo para ultimos_viajes: si en 4s no llega, seguimos sin él
+    const ultimosTimeout = setTimeout(()=>{
+      if(!ultimosReady){ ultimosReady=true; ud=ud||[]; tryFinalize(); }
+    }, 4000);
+
     setLoadMsg("Descargando viajes...");
-    Papa.parse(CSV_VIAJES,{download:true,header:true,skipEmptyLines:true,complete:(r)=>{vd=r.data;setLoadMsg("Descargando flota...");done();},error:(e)=>{setError("Error viajes: "+e.message);setLoading(false);}});
-    Papa.parse(CSV_FLOTA,{download:true,header:true,skipEmptyLines:true,complete:(r)=>{fd=r.data;done();},error:(e)=>{setError("Error flota: "+e.message);setLoading(false);}});
+    Papa.parse(CSV_VIAJES,{download:true,header:true,skipEmptyLines:true,complete:(r)=>{vd=r.data;setLoadMsg("Descargando flota...");tryFinalize();},error:(e)=>{setError("Error viajes: "+e.message);setLoading(false);}});
+    Papa.parse(CSV_FLOTA,{download:true,header:true,skipEmptyLines:true,complete:(r)=>{fd=r.data;tryFinalize();},error:(e)=>{setError("Error flota: "+e.message);setLoading(false);}});
+    Papa.parse(CSV_ULTIMOS,{download:true,header:true,skipEmptyLines:true,
+      complete:(r)=>{ud=r.data;ultimosReady=true;clearTimeout(ultimosTimeout);tryFinalize();},
+      error:()=>{ud=[];ultimosReady=true;clearTimeout(ultimosTimeout);tryFinalize();}
+    });
   },[]);
 
   const spinStyle=`@keyframes spin{to{transform:rotate(360deg)}}`;
@@ -675,7 +1022,6 @@ export default function App(){
 
   return(<div style={{minHeight:"100vh",background:T.bg,color:T.tx,fontFamily:"'JetBrains Mono','Fira Code',monospace",fontSize:"13px",transition:"background 0.2s,color 0.2s"}}>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
-    {/* HEADER */}
     <header style={{background:T.sf,borderBottom:`1px solid ${T.bd}`,padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,boxShadow:T.headerShadow,gap:"12px",flexWrap:"wrap"}}>
       <div style={{display:"flex",alignItems:"center",gap:"12px"}}>
         <div style={{width:"36px",height:"36px",background:"linear-gradient(135deg,#f59e0b,#f97316)",borderRadius:"8px",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:"16px",color:"#000",flexShrink:0}}>TB</div>
@@ -685,44 +1031,30 @@ export default function App(){
         </div>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
-        <div style={{textAlign:"right",fontSize:"10px",color:T.txM,lineHeight:"1.7",display:"none"}}>
-          <div>{info.total?.toLocaleString("es-CL")} tramos | {info.tractos} tractos | {info.ramplas} ramplas</div>
-          <div>{info.minDate} al {info.maxDate} | {info.clientes} clientes | Flota: {info.flotaTotal} equipos</div>
-        </div>
         <ThemeToggle dark={darkMode} onToggle={toggleTheme}/>
       </div>
     </header>
-    {/* INFO BAR */}
     <div style={{background:T.isDark?"#0d1017":T.sf2,borderBottom:`1px solid ${T.bd}`,padding:"6px 24px",fontSize:"10px",color:T.txM,display:"flex",gap:"16px",flexWrap:"wrap",justifyContent:"space-between"}}>
-      <span>{info.total?.toLocaleString("es-CL")} tramos · {info.tractos} tractos · {info.ramplas} ramplas · {info.clientes} clientes · Flota: {info.flotaTotal} equipos</span>
+      <span>{info.total?.toLocaleString("es-CL")} tramos · {info.tractos} tractos · {info.ramplas} ramplas · {info.clientes} clientes · Flota: {info.flotaTotal} equipos{info.ultimosTotal?" · Últimos viajes: "+info.ultimosTotal+" equipos":""}</span>
       <span>{info.minDate} → {info.maxDate}</span>
     </div>
-    {/* NAV */}
     <div style={{background:T.sf,borderBottom:`1px solid ${T.bd}`,padding:"8px 24px",overflowX:"auto"}}>
       <nav style={{display:"flex",gap:"2px",background:T.navBg,borderRadius:"10px",padding:"3px",width:"fit-content"}}>
         {VIEWS.map(v=>(
-          <button key={v.id} onClick={()=>setView(v.id)} style={{
-            padding:"9px 15px",borderRadius:"8px",border:"none",cursor:"pointer",
-            fontSize:"12px",fontWeight:view===v.id?700:500,fontFamily:"inherit",
-            background:view===v.id?T.navActiveBg:"transparent",
-            color:view===v.id?T.navActiveText:T.txM,
-            transition:"all 0.15s",whiteSpace:"nowrap",
-            boxShadow:view===v.id?(T.isDark?"0 1px 3px rgba(0,0,0,0.3)":"0 1px 3px rgba(0,0,0,0.12)"):"none",
-          }}>
+          <button key={v.id} onClick={()=>setView(v.id)} style={{padding:"9px 15px",borderRadius:"8px",border:"none",cursor:"pointer",fontSize:"12px",fontWeight:view===v.id?700:500,fontFamily:"inherit",background:view===v.id?T.navActiveBg:"transparent",color:view===v.id?T.navActiveText:T.txM,transition:"all 0.15s",whiteSpace:"nowrap",boxShadow:view===v.id?(T.isDark?"0 1px 3px rgba(0,0,0,0.3)":"0 1px 3px rgba(0,0,0,0.12)"):"none"}}>
             {v.icon} {v.label}
           </button>
         ))}
       </nav>
     </div>
-    {/* MAIN */}
     <main style={{maxWidth:"1400px",margin:"0 auto",padding:"24px"}}>
       {view==="buscar"&&<Buscador tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} today={today} T={T}/>}
-      {view==="flota"&&<EstadoFlota data={data} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} today={today} T={T}/>}
-      {view==="inactivos"&&<Inactivos tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} today={today} T={T}/>}
+      {view==="flota"&&<EstadoFlota data={data} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
+      {view==="inactivos"&&<Inactivos tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
       {view==="clientes"&&<StatsCliente data={data} today={today} T={T}/>}
       {view==="rutas"&&<StatsRuta data={data} today={today} T={T}/>}
       {view==="detalle"&&<Detalle data={data} T={T}/>}
-      {view==="inventario"&&<Inventario flota={flota} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} today={today} T={T}/>}
+      {view==="inventario"&&<Inventario flota={flota} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} ultimosMap={ultimosMap} today={today} T={T}/>}
     </main>
   </div>);
 }
