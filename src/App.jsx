@@ -430,122 +430,142 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
 }
 
 // ═══ VIEW 3: INACTIVOS ═══
-// CRITERIO UNIFICADO:
-// ACTIVO   ≤ 30 días sin viaje
-// INACTIVO 31-90 días sin viaje
-// PARADO   > 90 días sin viaje
-// SIN VIAJES: en catálogo pero sin ningún registro histórico
-// La fuente de "último viaje" puede ser CSV viajes O ultimos_viajes (el que sea más reciente)
 function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const[tipo,setTipo]=useState("rampla");
+  const[filtroEstado,setFiltroEstado]=useState("todos");
+  const[filtroSuc,setFiltroSuc]=useState("todas");
+  const[pg,setPg]=useState(1);
+  const PP=100;
 
-  const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
+  const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf,zIndex:1};
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
   const badge=(c)=>({display:"inline-block",padding:"2px 8px",borderRadius:"4px",fontSize:"11px",fontWeight:600,background:`${c}22`,color:c,border:`1px solid ${c}44`});
 
-  // Construir lista completa con estado correcto
   const allEquipos = useMemo(()=>{
     const idx = tipo==="tracto" ? tractoIdx : ramplaIdx;
     const res = [];
-
-    // 1. Equipos que están en catálogo de flota
     for(const[pat,fi] of flota.entries()){
       const cat = getCategoria(fi.tipoequipo);
       if(tipo==="tracto" && cat!=="TRACTOCAMION") continue;
       if(tipo==="rampla" && cat!=="EQUIPO") continue;
-
       const tr = idx.get(pat);
-      let lastDate = null, lastRecord = null;
-
-      if(tr && tr.length > 0){
-        lastDate = tr[0]._date;
-        lastRecord = tr[0];
+      let lastDate=null, lastRecord=null;
+      if(tr&&tr.length>0){ lastDate=tr[0]._date; lastRecord=tr[0]; }
+      const u=ultimosMap.get(pat);
+      if(u&&(!lastDate||u._date>lastDate)){
+        lastDate=u._date;
+        lastRecord={Fecha:formatDate(u._date),Destino:u.Destino,Origen:u.Origen,Cliente:u.Cliente,Tracto:pat,Rampla:pat,_fromUltimos:true};
       }
-
-      // Complementar con ultimos_viajes si es más reciente
-      const u = ultimosMap.get(pat);
-      if(u && (!lastDate || u._date > lastDate)){
-        lastDate = u._date;
-        lastRecord = { Fecha: formatDate(u._date), Destino: u.Destino, Origen: u.Origen, Cliente: u.Cliente, Tracto: pat, Rampla: pat, _fromUltimos: true };
-      }
-
-      const days = lastDate ? daysBetween(lastDate, today) : null;
-      const estado = getEstadoEquipo(days);
-
-      res.push({ pat, days, lastRecord, suc: lastRecord ? getSucursal(lastRecord.Destino) : "OTROS", fi, estado, enCatalogo: true });
+      const days=lastDate?daysBetween(lastDate,today):null;
+      const estado=getEstadoEquipo(days);
+      res.push({pat,days,lastRecord,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS",fi,estado,enCatalogo:true,"lastRecord.Fecha":lastRecord?.Fecha||"","fi.tipoequipo":fi.tipoequipo||""});
     }
-
-    // 2. Equipos que tienen viajes pero NO están en catálogo (subcontratos, etc.)
     for(const[pat,tr] of idx.entries()){
-      if(flota.has(pat)) continue; // ya procesado
-      const lastDate = tr[0]._date;
-      const days = daysBetween(lastDate, today);
-      const estado = getEstadoEquipo(days);
-      const last = tr[0];
-      res.push({ pat, days, lastRecord: last, suc: getSucursal(last.Destino), fi: null, estado, enCatalogo: false });
+      if(flota.has(pat)) continue;
+      const lastDate=tr[0]._date;
+      const days=daysBetween(lastDate,today);
+      const last=tr[0];
+      const estado=getEstadoEquipo(days);
+      res.push({pat,days,lastRecord:last,suc:getSucursal(last.Destino),fi:null,estado,enCatalogo:false,"lastRecord.Fecha":last.Fecha||"","fi.tipoequipo":""});
     }
-
     return res;
-  },[tractoIdx, ramplaIdx, flota, ultimosMap, today, tipo]);
+  },[tractoIdx,ramplaIdx,flota,ultimosMap,today,tipo]);
 
-  const cols = [
-    {key:"pat", label:"Patente"},
-    {key:"days", label:"Días inactivo"},
-    {key:"lastRecord.Fecha", label:"Último Mov."},
-    {key:"suc", label:"Sucursal"},
-    {key:"estado", label:"Estado"},
-    {key:"enCatalogo", label:"Catálogo"},
-    {key:"fi.tipoequipo", label:"Tipo Equipo"},
-  ];
-
-  const flatData = useMemo(()=>allEquipos.map(r=>({
-    ...r,
-    "lastRecord.Fecha": r.lastRecord?.Fecha || "",
-    "fi.tipoequipo": r.fi?.tipoequipo || "",
-  })),[allEquipos]);
-
-  const {sorted, sortKey, sortDir, toggle} = useSortable(flatData, "days", "desc");
-
-  // Contar por estado
-  const estadoCount = useMemo(()=>{
+  const estadoCount=useMemo(()=>{
     const m={ACTIVO:0,INACTIVO:0,PARADO:0,"SIN VIAJES":0};
-    allEquipos.forEach(r=>{ m[r.estado]=(m[r.estado]||0)+1; });
+    allEquipos.forEach(r=>{m[r.estado]=(m[r.estado]||0)+1;});
     return m;
   },[allEquipos]);
+
+  const sucursales=useMemo(()=>[...new Set(allEquipos.map(r=>r.suc))].sort(),[allEquipos]);
+
+  const filtered=useMemo(()=>{
+    let f=allEquipos;
+    if(filtroEstado!=="todos") f=f.filter(r=>r.estado===filtroEstado);
+    if(filtroSuc!=="todas") f=f.filter(r=>r.suc===filtroSuc);
+    return f;
+  },[allEquipos,filtroEstado,filtroSuc]);
+
+  const {sorted,sortKey,sortDir,toggle}=useSortable(filtered,"days","desc");
+  const totalP=Math.ceil(sorted.length/PP);
+  const pd=sorted.slice((pg-1)*PP,pg*PP);
+
+  // Reset página al cambiar filtros
+  useEffect(()=>setPg(1),[filtroEstado,filtroSuc,tipo]);
+
+  // Botones de filtro por estado
+  const estadoBtns=[
+    {key:"todos",label:"Todos",count:allEquipos.length,color:T.tx},
+    {key:"ACTIVO",label:"Activos",count:estadoCount.ACTIVO,color:T.grn},
+    {key:"INACTIVO",label:"Inactivos",count:estadoCount.INACTIVO,color:T.ac},
+    {key:"PARADO",label:"Parados",count:estadoCount.PARADO,color:T.red},
+    {key:"SIN VIAJES",label:"Sin viajes",count:estadoCount["SIN VIAJES"],color:T.txM},
+  ];
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
       <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⚠️ Estado de Equipos</h2>
-      <select value={tipo} onChange={e=>setTipo(e.target.value)} style={sel}>
-        <option value="rampla">Ramplas / Equipos</option>
-        <option value="tracto">Tractocamiones</option>
-      </select>
+      <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+        <select value={filtroSuc} onChange={e=>setFiltroSuc(e.target.value)} style={sel}>
+          <option value="todas">Todas las sucursales</option>
+          {sucursales.map(s=><option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={tipo} onChange={e=>setTipo(e.target.value)} style={sel}>
+          <option value="rampla">Ramplas / Equipos</option>
+          <option value="tracto">Tractocamiones</option>
+        </select>
+      </div>
     </div>
 
-    {/* Leyenda de criterios */}
-    <div style={{background:T.sf2,border:`1px solid ${T.bd}`,borderRadius:"10px",padding:"12px 16px",marginBottom:"16px",fontSize:"11px",color:T.txM}}>
-      <strong style={{color:T.tx}}>Criterio de clasificación:</strong>
-      {" "}<span style={{color:T.grn}}>●</span> ACTIVO: último viaje hace ≤ 30 días
-      {" · "}<span style={{color:T.ac}}>●</span> INACTIVO: 31–90 días
-      {" · "}<span style={{color:T.red}}>●</span> PARADO: {"> "}90 días
-      {" · "}<span style={{color:T.txM}}>●</span> SIN VIAJES: sin registro histórico
-      {" · Fuente: historial CSV viajes + archivo Últimos Viajes (equipos pre-2024)"}
+    {/* Leyenda */}
+    <div style={{background:T.sf2,border:`1px solid ${T.bd}`,borderRadius:"10px",padding:"10px 16px",marginBottom:"16px",fontSize:"11px",color:T.txM}}>
+      <strong style={{color:T.tx}}>Criterio:</strong>
+      {" "}<span style={{color:T.grn}}>● ACTIVO</span> ≤30d
+      {" · "}<span style={{color:T.ac}}>● INACTIVO</span> 31–90d
+      {" · "}<span style={{color:T.red}}>● PARADO</span> +90d
+      {" · "}<span style={{color:T.txM}}>● SIN VIAJES</span> sin historial
     </div>
 
-    <div style={{display:"flex",gap:"12px",flexWrap:"wrap",marginBottom:"16px"}}>
-      <StatCard T={T} icon="✅" value={estadoCount.ACTIVO} label="Activos (≤30d)" color={T.grn}/>
-      <StatCard T={T} icon="🟡" value={estadoCount.INACTIVO} label="Inactivos (31-90d)" color={T.ac}/>
-      <StatCard T={T} icon="🔴" value={estadoCount.PARADO} label="Parados (+90d)" color={T.red}/>
-      <StatCard T={T} icon="⚪" value={estadoCount["SIN VIAJES"]} label="Sin viajes" color={T.txM}/>
+    {/* Botones filtro por estado — CLICKEABLES */}
+    <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"16px"}}>
+      {estadoBtns.map(b=>{
+        const active=filtroEstado===b.key;
+        return(
+          <button key={b.key} onClick={()=>setFiltroEstado(b.key)} style={{
+            display:"flex",flexDirection:"column",alignItems:"center",padding:"12px 20px",
+            borderRadius:"12px",border:`2px solid ${active?b.color:T.bd}`,
+            background:active?`${b.color}18`:T.sf,
+            cursor:"pointer",transition:"all 0.15s",minWidth:"100px",
+            boxShadow:active?`0 0 0 1px ${b.color}44`:T.cardShadow,
+          }}>
+            <span style={{fontSize:"22px",fontWeight:700,color:b.color,lineHeight:1.2}}>{b.count.toLocaleString("es-CL")}</span>
+            <span style={{fontSize:"10px",color:active?b.color:T.txM,marginTop:"4px",textTransform:"uppercase",letterSpacing:"1px",fontWeight:active?700:400}}>{b.label}</span>
+          </button>
+        );
+      })}
     </div>
 
     <div style={card}>
-      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>
-        {sorted.length.toLocaleString("es-CL")} equipos · Click en columna para ordenar
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px",flexWrap:"wrap",gap:"8px"}}>
+        <span style={{fontSize:"12px",color:T.txM}}>
+          Mostrando <strong style={{color:T.tx}}>{sorted.length.toLocaleString("es-CL")}</strong> equipos
+          {filtroEstado!=="todos"&&<span style={{color:T.ac}}> · Filtro: {filtroEstado}</span>}
+          {filtroSuc!=="todas"&&<span style={{color:T.ac}}> · {filtroSuc}</span>}
+          {" · Click en columna para ordenar"}
+        </span>
+        {totalP>1&&(
+          <div style={{display:"flex",gap:"4px",alignItems:"center"}}>
+            <button onClick={()=>setPg(1)} disabled={pg===1} style={{padding:"5px 9px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===1?.3:1}}>«</button>
+            <button onClick={()=>setPg(p=>Math.max(1,p-1))} disabled={pg===1} style={{padding:"5px 9px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===1?.3:1}}>‹</button>
+            <span style={{fontSize:"11px",color:T.txM,padding:"0 8px"}}>{pg} / {totalP} · {((pg-1)*PP+1).toLocaleString()}–{Math.min(pg*PP,sorted.length).toLocaleString()} de {sorted.length.toLocaleString()}</span>
+            <button onClick={()=>setPg(p=>Math.min(totalP,p+1))} disabled={pg===totalP} style={{padding:"5px 9px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===totalP?.3:1}}>›</button>
+            <button onClick={()=>setPg(totalP)} disabled={pg===totalP} style={{padding:"5px 9px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===totalP?.3:1}}>»</button>
+          </div>
+        )}
       </div>
-      <div style={{maxHeight:"600px",overflowY:"auto",overflowX:"auto"}}>
+      <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
           <thead><tr>
             <SortTh label="Patente" col="pat" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
@@ -559,11 +579,11 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
             <SortTh label="Tipo Equipo" col="fi.tipoequipo" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
             <SortTh label="En Catálogo" col="enCatalogo" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
           </tr></thead>
-          <tbody>{sorted.slice(0,150).map((r,i)=>{
-            const ec = ESTADO_COLOR(r.estado, T);
+          <tbody>{pd.map((r,i)=>{
+            const ec=ESTADO_COLOR(r.estado,T);
             return(<tr key={r.pat} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
               <td style={{...td,fontWeight:700}}>{r.pat}</td>
-              <td style={{...td,color:ec,fontWeight:600}}>{r.days !== null ? r.days+"d" : "—"}</td>
+              <td style={{...td,color:ec,fontWeight:600}}>{r.days!==null?r.days+"d":"—"}</td>
               <td style={td}>{r.lastRecord?.Fecha||"—"}</td>
               <td style={td}>{r.lastRecord?.Destino||"—"}</td>
               <td style={td}><SucBadge s={r.suc} T={T}/></td>
@@ -576,7 +596,24 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
           })}</tbody>
         </table>
       </div>
-      {sorted.length>150&&<div style={{textAlign:"center",padding:"8px",color:T.txM,fontSize:"11px"}}>Mostrando 150 de {sorted.length}</div>}
+      {/* Paginación inferior también */}
+      {totalP>1&&(
+        <div style={{display:"flex",gap:"4px",alignItems:"center",justifyContent:"center",marginTop:"12px"}}>
+          <button onClick={()=>setPg(1)} disabled={pg===1} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===1?.3:1}}>«</button>
+          <button onClick={()=>setPg(p=>Math.max(1,p-1))} disabled={pg===1} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===1?.3:1}}>‹</button>
+          {Array.from({length:Math.min(7,totalP)},(_,i)=>{
+            let p;
+            if(totalP<=7) p=i+1;
+            else if(pg<=4) p=i+1;
+            else if(pg>=totalP-3) p=totalP-6+i;
+            else p=pg-3+i;
+            if(p<1||p>totalP) return null;
+            return(<button key={p} onClick={()=>setPg(p)} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${p===pg?T.ac:T.bd}`,background:p===pg?T.acD:T.sf2,color:p===pg?T.ac:T.tx,cursor:"pointer",fontSize:"11px",fontWeight:p===pg?700:400}}>{p}</button>);
+          })}
+          <button onClick={()=>setPg(p=>Math.min(totalP,p+1))} disabled={pg===totalP} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===totalP?.3:1}}>›</button>
+          <button onClick={()=>setPg(totalP)} disabled={pg===totalP} style={{padding:"6px 10px",borderRadius:"6px",border:`1px solid ${T.bd}`,background:T.sf2,color:T.tx,cursor:"pointer",fontSize:"11px",opacity:pg===totalP?.3:1}}>»</button>
+        </div>
+      )}
     </div>
   </div>);
 }
