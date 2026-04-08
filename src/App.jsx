@@ -5,10 +5,8 @@ const CSV_VIAJES = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856G
 const CSV_FLOTA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856GFyKLBBXGcgeUnkqttWGvFXbbeKDwGWoNDuBd0Tn9VJLDfRSezlD8zHi8Q_E6RlciYlT/pub?gid=923646374&single=true&output=csv";
 const CSV_ULTIMOS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856GFyKLBBXGcgeUnkqttWGvFXbbeKDwGWoNDuBd0Tn9VJLDfRSezlD8zHi8Q_E6RlciYlT/pub?gid=1827964132&single=true&output=csv";
 
-// Constante para identificar viajes sin solicitud
 const SIN_SOLICITUD = "-Viaje sin solicitud -";
 
-// ─── Sucursales ───
 const SUCURSAL_MAP = {
   "POZO ALMONTE": ["POZO ALMONTE","IQUIQUE","ALTO HOSPICIO","COLLAHUASI","QUEBRADA BLANCA","PICA","ARICA","PUERTO PATACHE","PUERTO IQUIQUE","NUDO URIBE","TALABRE"],
   "MEJILLONES": ["MEJILLONES"],
@@ -37,7 +35,20 @@ const SUCURSAL_COLORS_LIGHT = {
   "OTROS":{bg:"#f1f5f9",text:"#64748b",accent:"#94a3b8"}
 };
 
-function getSucursal(loc){if(!loc)return "OTROS";const l=loc.toUpperCase().trim();for(const[s,ls]of Object.entries(SUCURSAL_MAP)){if(ls.includes(l))return s;}return "OTROS";}
+// ── CAMBIO 1: caché de módulo para getSucursal — evita re-recorrer SUCURSAL_MAP
+// en cada fila de cada tabla (puede llamarse miles de veces por render)
+const _sucCache = new Map();
+function getSucursal(loc) {
+  if (!loc) return "OTROS";
+  const l = loc.toUpperCase().trim();
+  const hit = _sucCache.get(l);
+  if (hit !== undefined) return hit;
+  for (const [s, ls] of Object.entries(SUCURSAL_MAP)) {
+    if (ls.includes(l)) { _sucCache.set(l, s); return s; }
+  }
+  _sucCache.set(l, "OTROS");
+  return "OTROS";
+}
 
 const EQUIPO_KEYWORDS = ["RAMPLA","ESTANQUE","FURGON","EXTENSIBLE","CAMA BAJA","MODULAR","MEGALIFT","DOLLY","EQUIPOS ESPECIALES"];
 function getCategoria(tipo){
@@ -52,7 +63,6 @@ function parseDate(str){if(!str)return null;if(str instanceof Date)return str;co
 function formatDate(d){if(!d)return "-";return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();}
 function daysBetween(d1,d2){return Math.floor((d2-d1)/86400000);}
 
-// ─── ESTADO EQUIPO — lógica centralizada ───
 function getEstadoEquipo(daysInactive) {
   if (daysInactive === null || daysInactive === undefined) return "SIN VIAJES";
   if (daysInactive <= 30) return "ACTIVO";
@@ -66,7 +76,6 @@ const ESTADO_COLOR = (estado, T) => ({
   "SIN VIAJES": T.txM,
 }[estado] || T.txM);
 
-// ─── THEME TOKENS ───
 function makeTheme(dark) {
   if (dark) return {
     bg:"#0a0c10", sf:"#12151c", sf2:"#1a1e28", bd:"#252a36",
@@ -94,14 +103,17 @@ function makeTheme(dark) {
   };
 }
 
-// ─── SORTABLE TABLE HOOK ───
+// ── CAMBIO 2: toggle sin dependencia de sortKey — usa updater funcional
+// para que useCallback no necesite recrearse en cada cambio de columna
 function useSortable(data, defaultKey, defaultDir = "asc") {
   const [sortKey, setSortKey] = useState(defaultKey);
   const [sortDir, setSortDir] = useState(defaultDir);
   const toggle = useCallback((key) => {
-    setSortDir(d => sortKey === key ? (d === "asc" ? "desc" : "asc") : "asc");
-    setSortKey(key);
-  }, [sortKey]);
+    setSortKey(prev => {
+      setSortDir(d => prev === key ? (d === "asc" ? "desc" : "asc") : "asc");
+      return key;
+    });
+  }, []); // sin dependencias — estable para siempre
   const sorted = useMemo(() => {
     if (!sortKey) return data;
     return [...data].sort((a, b) => {
@@ -115,7 +127,6 @@ function useSortable(data, defaultKey, defaultDir = "asc") {
   return { sorted, sortKey, sortDir, toggle };
 }
 
-// ─── SORT HEADER ───
 function SortTh({ label, col, sortKey, sortDir, toggle, style }) {
   const active = sortKey === col;
   return (
@@ -195,7 +206,6 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
     {results&&results.length===0&&<div style={{...card,textAlign:"center",color:T.txM}}>Sin resultados para "{q}"</div>}
     {results&&results.map((r,i)=>{
       const last=r.tramos[0];const d=daysBetween(last._date,today);const suc=getSucursal(last.Destino);const fi=flota.get(r.pat);
-      // Indicador si el último movimiento es un viaje sin solicitud
       const esSinSolicitud = last.Cliente === SIN_SOLICITUD;
       return(<div key={i} style={{...card,borderLeft:`4px solid ${r.t==="TRACTO"?T.blu:T.ac}`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"12px",flexWrap:"wrap",gap:"8px"}}>
@@ -263,8 +273,6 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const th={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx};
 
-  // NOTA: data ya incluye viajes sin solicitud, útil para KM y último destino
-  // Para estadísticas de utilización usamos TODOS los viajes (incluyendo remonta/vacío)
   const stats=useMemo(()=>{
     const cutoff=new Date(today);cutoff.setDate(cutoff.getDate()-days);
 
@@ -282,33 +290,41 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
     let totalKm=0,totalTrips=0;
     const sucCount={};
 
+    // ── CAMBIO 3a: una sola pasada por tracto de flota con early-break
+    // (los datos están ordenados desc por fecha, podemos cortar cuando salimos del período)
     for(const pat of flotaTractos){
       const tr=tractoIdx.get(pat);
-      if(tr&&tr.length>0){
-        const recent=tr.filter(t=>t._date>=cutoff);
-        if(recent.length>0){
-          aT++;
-          // KM solo de viajes con solicitud real
-          totalKm+=recent.filter(t=>t.Cliente!==SIN_SOLICITUD).reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
-          totalTrips+=recent.filter(t=>t.Cliente!==SIN_SOLICITUD).length;
+      if(tr?.length>0){
+        let hasRecent=false;
+        for(const t of tr){
+          if(t._date<cutoff) break; // sorted desc → no hay más dentro del período
+          hasRecent=true;
+          if(t.Cliente!==SIN_SOLICITUD){
+            totalKm+=(Number(t.Kilometro)||0);
+            totalTrips++;
+          }
         }
+        if(hasRecent) aT++;
       } else {
-        const u=ultimosMap.get(pat);
-        if(u&&u._date>=cutoff){aT++;}
+        if(ultimosMap.get(pat)?._date>=cutoff) aT++;
       }
     }
 
+    // ── CAMBIO 3b: una sola pasada por equipo de flota con early-break
     for(const pat of flotaEquipos){
       const tr=ramplaIdx.get(pat);
-      if(tr&&tr.length>0){
-        const recent=tr.filter(t=>t._date>=cutoff);
-        if(recent.length>0)aE++;
-        const last=tr[0];
-        const sc=getSucursal(last.Destino);
+      if(tr?.length>0){
+        let hasRecent=false;
+        for(const t of tr){
+          if(t._date<cutoff) break;
+          hasRecent=true;
+        }
+        if(hasRecent) aE++;
+        const sc=getSucursal(tr[0].Destino);
         sucCount[sc]=(sucCount[sc]||0)+1;
       } else {
         const u=ultimosMap.get(pat);
-        if(u&&u._date>=cutoff)aE++;
+        if(u?._date>=cutoff) aE++;
         if(u){
           const sc=getSucursal(u.Destino||"");
           sucCount[sc]=(sucCount[sc]||0)+1;
@@ -316,18 +332,29 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       }
     }
 
-    // KM totales del período (solo viajes con solicitud real)
-    for(const[,tr]of tractoIdx.entries()){
-      const recent=tr.filter(t=>t._date>=cutoff&&t.Cliente!==SIN_SOLICITUD);
-      if(!flotaTractos.has([...tractoIdx.entries()].find(([k,v])=>v===tr)?.[0])){
-        totalKm+=recent.reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
-        totalTrips+=recent.length;
+    // ── CAMBIO 3c: corregido bug O(n²) — el loop original usaba
+    // [...tractoIdx.entries()].find(([k,v])=>v===tr) que compara arrays
+    // por referencia (nunca hace match) y es O(n) por iteración.
+    // Ahora simplemente se salta los tractos ya contados con flotaTractos.has()
+    for(const[pat,tr]of tractoIdx.entries()){
+      if(flotaTractos.has(pat)) continue; // ya sumado en el loop anterior
+      for(const t of tr){
+        if(t._date<cutoff) break;
+        if(t.Cliente!==SIN_SOLICITUD){
+          totalKm+=(Number(t.Kilometro)||0);
+          totalTrips++;
+        }
       }
     }
 
+    // ── CAMBIO 3d: top KM con early-break
     const tKm=[];
     for(const[k,tr]of tractoIdx.entries()){
-      const km=tr.filter(t=>t._date>=cutoff&&t.Cliente!==SIN_SOLICITUD).reduce((s,t)=>s+(Number(t.Kilometro)||0),0);
+      let km=0;
+      for(const t of tr){
+        if(t._date<cutoff) break;
+        if(t.Cliente!==SIN_SOLICITUD) km+=(Number(t.Kilometro)||0);
+      }
       if(km>0)tKm.push([k,km]);
     }
     tKm.sort((a,b)=>b[1]-a[1]);
@@ -550,33 +577,17 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
     return res;
   },[tractoIdx,ramplaIdx,flota,ultimosMap,today,tipo,soloDoc]);
 
-  const catalogoEquipos = useMemo(()=>{
-    const idx = tipo==="tracto" ? tractoIdx : ramplaIdx;
-    const res = [];
-    for(const[pat,fi] of flota.entries()){
-      const cat = getCategoria(fi.tipoequipo);
-      if(tipo==="tracto" && cat!=="TRACTOCAMION") continue;
-      if(tipo==="rampla" && cat!=="EQUIPO") continue;
-      const tr = idx.get(pat);
-      let lastDate=null, lastRecord=null;
-      if(tr&&tr.length>0){ lastDate=tr[0]._date; lastRecord=tr[0]; }
-      const u=ultimosMap.get(pat);
-      if(u&&(!lastDate||u._date>lastDate)){
-        lastDate=u._date;
-        lastRecord={Fecha:formatDate(u._date),Destino:u.Destino};
-      }
-      const days=lastDate?daysBetween(lastDate,today):null;
-      const estado=getEstadoEquipo(days);
-      res.push({estado,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS"});
-    }
-    return res;
-  },[tractoIdx,ramplaIdx,flota,ultimosMap,today,tipo]);
-
+  // ── CAMBIO 4: eliminado useMemo catalogoEquipos (era trabajo duplicado de allEquipos)
+  // estadoCount se deriva directamente filtrando enCatalogo:true en allEquipos
   const estadoCount=useMemo(()=>{
-    const m={ACTIVO:0,INACTIVO:0,PARADO:0,"SIN VIAJES":0};
-    catalogoEquipos.forEach(r=>{m[r.estado]=(m[r.estado]||0)+1;});
+    const m={ACTIVO:0,INACTIVO:0,PARADO:0,"SIN VIAJES":0,total:0};
+    for(const r of allEquipos){
+      if(!r.enCatalogo) continue;
+      m.total++;
+      m[r.estado]=(m[r.estado]||0)+1;
+    }
     return m;
-  },[catalogoEquipos]);
+  },[allEquipos]);
 
   const sucursales=useMemo(()=>[...new Set(allEquipos.map(r=>r.suc))].sort(),[allEquipos]);
 
@@ -594,7 +605,7 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   useEffect(()=>setPg(1),[filtroEstado,filtroSuc,tipo,soloDoc]);
 
   const estadoBtns=[
-    {key:"todos",label:"Todos",count:catalogoEquipos.length,color:T.tx},
+    {key:"todos",label:"Todos",count:estadoCount.total,color:T.tx},
     {key:"ACTIVO",label:"Activos",count:estadoCount.ACTIVO,color:T.grn},
     {key:"INACTIVO",label:"Inactivos",count:estadoCount.INACTIVO,color:T.ac},
     {key:"PARADO",label:"Parados",count:estadoCount.PARADO,color:T.red},
@@ -750,7 +761,6 @@ function StatsCliente({data,today,T}){
 
   const rawStats=useMemo(()=>{
     const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
-    // EXCLUIR viajes sin solicitud de estadísticas por cliente
     const filtered=(months===99?data:data.filter(d=>d._date>=cutoff))
       .filter(d=>d.Cliente!==SIN_SOLICITUD);
     const byC={};
@@ -813,7 +823,6 @@ function StatsRuta({data,today,T}){
 
   const rawStats=useMemo(()=>{
     const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
-    // EXCLUIR viajes sin solicitud de estadísticas por ruta
     const filtered=(months===99?data:data.filter(d=>d._date>=cutoff))
       .filter(d=>d.Cliente!==SIN_SOLICITUD);
     const byR={};
@@ -871,14 +880,32 @@ function Detalle({data,T}){
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
   const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
 
-  // En Detalle EXCLUIMOS viajes sin solicitud — son rutas internas sin cliente
   const dataFiltrada = useMemo(()=>data.filter(d=>d.Cliente!==SIN_SOLICITUD),[data]);
 
   const cls=useMemo(()=>[...new Set(dataFiltrada.map(d=>d.Cliente))].sort(),[dataFiltrada]);
   const cgs=useMemo(()=>[...new Set(dataFiltrada.map(d=>d.Carga?.trim()).filter(c=>c&&!/^\d+$/.test(c)))].sort(),[dataFiltrada]);
-  const filtered=useMemo(()=>{let f=dataFiltrada;if(fd){const d=new Date(fd);f=f.filter(r=>r._date>=d);}if(fh){const d=new Date(fh);d.setDate(d.getDate()+1);f=f.filter(r=>r._date<d);}
-    if(cl)f=f.filter(r=>r.Cliente===cl);if(tr)f=f.filter(r=>r.Tracto?.toUpperCase().includes(tr.toUpperCase()));if(ra)f=f.filter(r=>r.Rampla?.toUpperCase().includes(ra.toUpperCase()));
-    if(or)f=f.filter(r=>r.Origen?.toUpperCase().includes(or.toUpperCase()));if(de)f=f.filter(r=>r.Destino?.toUpperCase().includes(de.toUpperCase()));if(cg)f=f.filter(r=>r.Carga===cg);return f;
+
+  // ── CAMBIO 5: una sola pasada en lugar de 8 .filter() encadenados
+  const filtered=useMemo(()=>{
+    const dateFrom = fd ? new Date(fd) : null;
+    let dateTo = null;
+    if (fh) { dateTo = new Date(fh); dateTo.setDate(dateTo.getDate() + 1); }
+    const trUp = tr ? tr.toUpperCase() : null;
+    const raUp = ra ? ra.toUpperCase() : null;
+    const orUp = or ? or.toUpperCase() : null;
+    const deUp = de ? de.toUpperCase() : null;
+
+    return dataFiltrada.filter(r => {
+      if (dateFrom && r._date < dateFrom) return false;
+      if (dateTo && r._date >= dateTo) return false;
+      if (cl && r.Cliente !== cl) return false;
+      if (trUp && !r.Tracto?.toUpperCase().includes(trUp)) return false;
+      if (raUp && !r.Rampla?.toUpperCase().includes(raUp)) return false;
+      if (orUp && !r.Origen?.toUpperCase().includes(orUp)) return false;
+      if (deUp && !r.Destino?.toUpperCase().includes(deUp)) return false;
+      if (cg && r.Carga !== cg) return false;
+      return true;
+    });
   },[dataFiltrada,fd,fh,cl,tr,ra,or,de,cg]);
 
   const{sorted,sortKey,sortDir,toggle}=useSortable(filtered,"_date","desc");
@@ -981,6 +1008,13 @@ function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
     filtered.forEach(f=>{if(f.fecha)byYear[f.fecha]=(byYear[f.fecha]||0)+1;byEstado[f.estado]=(byEstado[f.estado]||0)+1;if(f.age!==null){totalAge+=f.age;ageCount++;}});
     return{byYear:Object.entries(byYear).sort((a,b)=>a[0].localeCompare(b[0])),byEstado,avgAge:ageCount?(totalAge/ageCount).toFixed(1):"-"};},[filtered]);
 
+  // ── CAMBIO 6: IIFE extraída a useMemo — ya no corre en cada render
+  const byTypeEntries = useMemo(() => {
+    const byT = {};
+    filtered.forEach(f => { byT[f.tipoequipo] = (byT[f.tipoequipo] || 0) + 1; });
+    return Object.entries(byT).sort((a, b) => b[1] - a[1]);
+  }, [filtered]);
+
   return(<div>
     <h2 style={{margin:"0 0 16px",fontSize:"16px",color:T.tx}}>🏗️ Inventario de Flota</h2>
     <div style={{background:T.sf2,border:`1px solid ${T.bd}`,borderRadius:"10px",padding:"10px 16px",marginBottom:"12px",fontSize:"11px",color:T.txM}}>
@@ -1025,14 +1059,17 @@ function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
       <div style={card}>
         <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>🏷️ Por Tipo de Equipo</div>
         <div style={{maxHeight:"300px",overflowY:"auto"}}>
-          {(()=>{const byT={};filtered.forEach(f=>{byT[f.tipoequipo]=(byT[f.tipoequipo]||0)+1;});return Object.entries(byT).sort((a,b)=>b[1]-a[1]).map(([t,c])=>{const pct=(c/filtered.length*100);return(<div key={t} style={{marginBottom:"6px"}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:"2px",fontSize:"12px"}}>
-              <span style={{color:T.tx}}>{t}</span><span style={{fontWeight:600,color:T.tx}}>{c}</span>
-            </div>
-            <div style={{height:"6px",background:T.sf2,borderRadius:"3px",border:`1px solid ${T.bd}`}}>
-              <div style={{height:"100%",width:pct+"%",background:T.ac,borderRadius:"3px"}}/>
-            </div>
-          </div>);});})()}
+          {byTypeEntries.map(([t,c])=>{
+            const pct=(c/filtered.length*100);
+            return(<div key={t} style={{marginBottom:"6px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:"2px",fontSize:"12px"}}>
+                <span style={{color:T.tx}}>{t}</span><span style={{fontWeight:600,color:T.tx}}>{c}</span>
+              </div>
+              <div style={{height:"6px",background:T.sf2,borderRadius:"3px",border:`1px solid ${T.bd}`}}>
+                <div style={{height:"100%",width:pct+"%",background:T.ac,borderRadius:"3px"}}/>
+              </div>
+            </div>);
+          })}
         </div>
       </div>
     </div>
@@ -1101,7 +1138,6 @@ export default function App(){
 
   const{tractoIdx,ramplaIdx}=useMemo(()=>{
     const ti=new Map(),ri=new Map();
-    // Indexar TODOS los viajes incluyendo sin solicitud (para último destino)
     for(const row of data){
       if(row.Tracto){if(!ti.has(row.Tracto))ti.set(row.Tracto,[]);ti.get(row.Tracto).push(row);}
       if(row.Rampla){if(!ri.has(row.Rampla))ri.set(row.Rampla,[]);ri.get(row.Rampla).push(row);}
@@ -1123,9 +1159,6 @@ export default function App(){
       setLoadMsg("Indexando...");
       setTimeout(()=>{
         try{
-          // ── CAMBIO CLAVE: NO filtrar viajes sin solicitud aquí ──
-          // Se incluyen TODOS para que el último destino del equipo sea correcto.
-          // El filtro se aplica en cada vista analítica (StatsCliente, StatsRuta, Detalle).
           let rows=vd;
           rows=rows.map(r=>({...r,_date:parseDate(r.Fecha)})).filter(r=>r._date);
           rows.sort((a,b)=>b._date-a._date||(b.Expedicion||"").localeCompare(a.Expedicion||""));
@@ -1153,7 +1186,6 @@ export default function App(){
             });
           }
 
-          // Para el banner: contar clientes excluyendo "sin solicitud"
           const rowsConSolicitud = rows.filter(r=>r.Cliente!==SIN_SOLICITUD);
           setInfo({
             total:rows.length,
