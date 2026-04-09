@@ -1338,12 +1338,12 @@ function Combustible({data, flota, tractoIdx, today, T}) {
   const thStyle = {textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
   const td = {padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
 
-  const [months, setMonths] = useState(6);
+  const [months, setMonths] = useState(0); // 0 = mes actual
   const [filtroSuc, setFiltroSuc] = useState("todas");
   const [precioDiesel, setPrecioDiesel] = useState(1244); // $/litro neto default post-alza marzo 2026
 
-  // Rendimientos por marca (km/litro)
-  const REND = {SCANIA: 3.3, VOLVO: 2.8, OTRO: 2.5};
+  // Rendimientos por marca (km/litro) — solo Scania y Volvo (únicas marcas de tracto en flota)
+  const REND = {SCANIA: 3.3, VOLVO: 2.8};
 
   // Construir mapa tracto → marca (desde flota)
   const tractoMarca = useMemo(() => {
@@ -1352,8 +1352,7 @@ function Combustible({data, flota, tractoIdx, today, T}) {
       if (getCategoria(v.tipoequipo) !== "TRACTOCAMION") continue;
       const marca = (v.marca || "").toUpperCase().trim();
       if (marca.includes("SCANIA")) m.set(pat, "SCANIA");
-      else if (marca.includes("VOLVO")) m.set(pat, "VOLVO");
-      else m.set(pat, "OTRO");
+      else m.set(pat, "VOLVO"); // Volvo es la marca dominante; tractos sin marca conocida se asignan acá
     }
     return m;
   }, [flota]);
@@ -1362,22 +1361,34 @@ function Combustible({data, flota, tractoIdx, today, T}) {
   const rendPromedio = useMemo(() => {
     let totalW = 0, count = 0;
     for (const [, marca] of tractoMarca) {
-      totalW += REND[marca] || REND.OTRO;
+      totalW += REND[marca] || REND.VOLVO;
       count++;
     }
-    return count > 0 ? (totalW / count) : REND.OTRO;
+    return count > 0 ? (totalW / count) : REND.VOLVO;
   }, [tractoMarca]);
 
   // Calcular KM por mes, sucursal y por marca de tracto
   const monthlyStats = useMemo(() => {
-    const cutoff = new Date(today);
-    cutoff.setMonth(cutoff.getMonth() - months);
-    const filtered = data.filter(r => r._date >= cutoff && r.Cliente !== SIN_SOLICITUD);
+    let filtered;
+    if (months === 0) {
+      // Mes actual
+      const mk = getMonthKey(today);
+      filtered = data.filter(r => getMonthKey(r._date) === mk && r.Cliente !== SIN_SOLICITUD);
+    } else if (months === -1) {
+      // Mes anterior
+      const prev = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const mk = getMonthKey(prev);
+      filtered = data.filter(r => getMonthKey(r._date) === mk && r.Cliente !== SIN_SOLICITUD);
+    } else {
+      const cutoff = new Date(today);
+      cutoff.setMonth(cutoff.getMonth() - months);
+      filtered = data.filter(r => r._date >= cutoff && r.Cliente !== SIN_SOLICITUD);
+    }
 
     const byMonth = {};
     filtered.forEach(r => {
       const mk = getMonthKey(r._date);
-      if (!byMonth[mk]) byMonth[mk] = {km: 0, tramos: 0, tractos: new Set(), bySuc: {}, byMarca: {SCANIA:{km:0,tramos:0}, VOLVO:{km:0,tramos:0}, OTRO:{km:0,tramos:0}}};
+      if (!byMonth[mk]) byMonth[mk] = {km: 0, tramos: 0, tractos: new Set(), bySuc: {}, byMarca: {SCANIA:{km:0,tramos:0}, VOLVO:{km:0,tramos:0}}};
       const km = Number(r.Kilometro) || 0;
       byMonth[mk].km += km;
       byMonth[mk].tramos++;
@@ -1388,8 +1399,8 @@ function Combustible({data, flota, tractoIdx, today, T}) {
       byMonth[mk].bySuc[suc].km += km;
       byMonth[mk].bySuc[suc].tramos++;
 
-      // Por marca
-      const marca = tractoMarca.get(r.Tracto) || "OTRO";
+      // Por marca — solo Scania y Volvo
+      const marca = tractoMarca.get(r.Tracto) || "VOLVO";
       byMonth[mk].byMarca[marca].km += km;
       byMonth[mk].byMarca[marca].tramos++;
     });
@@ -1427,16 +1438,15 @@ function Combustible({data, flota, tractoIdx, today, T}) {
 
   // Calcular litros con rendimiento por marca
   const calcLitrosMarca = useCallback((byMarca) => {
-    const sc = byMarca.SCANIA.km / REND.SCANIA;
-    const vo = byMarca.VOLVO.km / REND.VOLVO;
-    const ot = byMarca.OTRO.km / REND.OTRO;
-    return {scania: Math.round(sc), volvo: Math.round(vo), otro: Math.round(ot), total: Math.round(sc + vo + ot)};
+    const sc = (byMarca.SCANIA?.km || 0) / REND.SCANIA;
+    const vo = (byMarca.VOLVO?.km || 0) / REND.VOLVO;
+    return {scania: Math.round(sc), volvo: Math.round(vo), total: Math.round(sc + vo)};
   }, []);
 
   // Variación mes a mes con litros por marca
   const withDelta = displayStats.map((m, i) => {
     const prev = i > 0 ? displayStats[i - 1] : null;
-    const litrosMarca = calcLitrosMarca(m.byMarca || {SCANIA:{km:0},VOLVO:{km:0},OTRO:{km:0}});
+    const litrosMarca = calcLitrosMarca(m.byMarca || {SCANIA:{km:0},VOLVO:{km:0}});
     return {
       ...m,
       deltaKm: prev ? ((m.km - prev.km) / Math.max(prev.km, 1) * 100) : null,
@@ -1466,11 +1476,11 @@ function Combustible({data, flota, tractoIdx, today, T}) {
 
   // Acumulado por marca (todo el período)
   const marcaAcum = useMemo(() => {
-    const acc = {SCANIA:{km:0,tramos:0}, VOLVO:{km:0,tramos:0}, OTRO:{km:0,tramos:0}};
+    const acc = {SCANIA:{km:0,tramos:0}, VOLVO:{km:0,tramos:0}};
     monthlyStats.forEach(m => {
-      for (const mk of ["SCANIA","VOLVO","OTRO"]) {
-        acc[mk].km += m.byMarca[mk].km;
-        acc[mk].tramos += m.byMarca[mk].tramos;
+      for (const mk of ["SCANIA","VOLVO"]) {
+        acc[mk].km += (m.byMarca[mk]?.km || 0);
+        acc[mk].tramos += (m.byMarca[mk]?.tramos || 0);
       }
     });
     return acc;
@@ -1504,7 +1514,7 @@ function Combustible({data, flota, tractoIdx, today, T}) {
           {sucursalesDisp.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <select value={months} onChange={e => setMonths(+e.target.value)} style={sel}>
-          <option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option><option value={99}>Todo</option>
+          <option value={0}>Mes actual</option><option value={-1}>Mes anterior</option><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option><option value={99}>Todo</option>
         </select>
       </div>
     </div>
@@ -1535,10 +1545,6 @@ function Combustible({data, flota, tractoIdx, today, T}) {
               <div style={{fontSize:"20px",fontWeight:700,color:"#8b5cf6"}}>{REND.VOLVO}</div>
               <div style={{fontSize:"10px",color:T.txM}}>VOLVO</div>
             </div>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:"20px",fontWeight:700,color:T.txM}}>{REND.OTRO}</div>
-              <div style={{fontSize:"10px",color:T.txM}}>OTROS</div>
-            </div>
           </div>
           <div style={{fontSize:"10px",color:T.txM,marginTop:"6px"}}>Promedio ponderado flota: <strong style={{color:T.tx}}>{rendPromedio.toFixed(2)} km/lt</strong></div>
         </div>
@@ -1565,7 +1571,6 @@ function Combustible({data, flota, tractoIdx, today, T}) {
         {[
           {marca:"SCANIA",color:"#3b82f6",rend:REND.SCANIA,data:marcaAcum.SCANIA},
           {marca:"VOLVO",color:"#8b5cf6",rend:REND.VOLVO,data:marcaAcum.VOLVO},
-          {marca:"OTROS",color:T.txM,rend:REND.OTRO,data:marcaAcum.OTRO},
         ].map(b => {
           const litros = b.data.km > 0 ? Math.round(b.data.km / b.rend) : 0;
           const costo = litros * precioDiesel;
@@ -1606,24 +1611,46 @@ function Combustible({data, flota, tractoIdx, today, T}) {
       </div>
     </div>
 
-    {/* Gráfico de barras por mes */}
-    <div style={card}>
-      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"14px",color:T.tx}}>📈 Evolución Mensual de KM</div>
-      <div style={{display:"flex",alignItems:"flex-end",gap:"6px",height:"180px",padding:"0 4px"}}>
+    {/* Evolución mensual — solo se muestra si hay más de 1 mes */}
+    {displayStats.length > 1 && <div style={card}>
+      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"14px",color:T.tx}}>📈 Evolución Mensual</div>
+      <div style={{overflowX:"auto"}}>
         {displayStats.map((m, i) => {
           const pct = maxKm > 0 ? (m.km / maxKm * 100) : 0;
           const prev = i > 0 ? displayStats[i - 1] : null;
-          const isUp = prev ? m.km >= prev.km : true;
+          const deltaKm = prev ? ((m.km - prev.km) / Math.max(prev.km, 1) * 100) : null;
+          const litros = calcLitrosMarca(m.byMarca || {SCANIA:{km:0},VOLVO:{km:0}});
+          const costo = litros.total * precioDiesel;
           return (
-            <div key={m.mes} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:"4px",minWidth:"40px"}}>
-              <span style={{fontSize:"10px",fontWeight:600,color:T.tx}}>{Math.round(m.km / 1000).toLocaleString("es-CL")}K</span>
-              <div style={{width:"100%",maxWidth:"60px",height:Math.max(pct, 2)+"%",background:`linear-gradient(180deg,${isUp?T.grn:T.red},${T.ac})`,borderRadius:"4px 4px 0 0",transition:"height 0.4s",minHeight:"4px"}}/>
-              <span style={{fontSize:"9px",color:T.txM,textAlign:"center",lineHeight:1.2}}>{m.label}</span>
+            <div key={m.mes} style={{marginBottom:"10px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"4px"}}>
+                <span style={{fontSize:"12px",fontWeight:600,color:T.tx,minWidth:"80px"}}>{m.label}</span>
+                <div style={{display:"flex",gap:"12px",alignItems:"center",fontSize:"11px"}}>
+                  <span style={{color:T.tx}}>{m.km.toLocaleString("es-CL")} km</span>
+                  <span style={{color:T.red}}>{litros.total.toLocaleString("es-CL")} lt</span>
+                  <span style={{color:T.red,fontWeight:600}}>{fmtM(costo)}</span>
+                  {deltaKm !== null && <DeltaBadge val={deltaKm}/>}
+                </div>
+              </div>
+              <div style={{height:"14px",background:T.sf2,borderRadius:"7px",border:`1px solid ${T.bd}`,overflow:"hidden",display:"flex"}}>
+                {/* Scania portion */}
+                {m.byMarca.SCANIA && m.byMarca.SCANIA.km > 0 && (
+                  <div style={{height:"100%",width:(m.byMarca.SCANIA.km / maxKm * 100)+"%",background:"#3b82f6",transition:"width 0.3s"}} title={"Scania: "+m.byMarca.SCANIA.km.toLocaleString("es-CL")+" km"}/>
+                )}
+                {/* Volvo portion */}
+                {m.byMarca.VOLVO && m.byMarca.VOLVO.km > 0 && (
+                  <div style={{height:"100%",width:(m.byMarca.VOLVO.km / maxKm * 100)+"%",background:"#8b5cf6",transition:"width 0.3s"}} title={"Volvo: "+m.byMarca.VOLVO.km.toLocaleString("es-CL")+" km"}/>
+                )}
+              </div>
             </div>
           );
         })}
+        <div style={{display:"flex",gap:"16px",marginTop:"8px",fontSize:"10px",color:T.txM}}>
+          <span><span style={{display:"inline-block",width:"10px",height:"10px",borderRadius:"2px",background:"#3b82f6",marginRight:"4px",verticalAlign:"middle"}}/>Scania</span>
+          <span><span style={{display:"inline-block",width:"10px",height:"10px",borderRadius:"2px",background:"#8b5cf6",marginRight:"4px",verticalAlign:"middle"}}/>Volvo</span>
+        </div>
       </div>
-    </div>
+    </div>}
 
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px",marginBottom:"16px"}}>
       {/* Tabla mensual con costo */}
