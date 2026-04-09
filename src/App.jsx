@@ -1331,26 +1331,53 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
 }
 
 // ═══ VIEW 9: COMBUSTIBLE ═══
-function Combustible({data, today, T}) {
+function Combustible({data, flota, tractoIdx, today, T}) {
   const card = {background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const sel = {background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
+  const inputStyle = {background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"10px 14px",color:T.tx,fontSize:"14px",fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
   const thStyle = {textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
   const td = {padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
 
   const [months, setMonths] = useState(6);
   const [filtroSuc, setFiltroSuc] = useState("todas");
+  const [precioDiesel, setPrecioDiesel] = useState(1244); // $/litro neto default post-alza marzo 2026
 
-  // Calcular KM por mes y sucursal (solo viajes reales, sin remonta)
+  // Rendimientos por marca (km/litro)
+  const REND = {SCANIA: 3.3, VOLVO: 2.8, OTRO: 2.5};
+
+  // Construir mapa tracto → marca (desde flota)
+  const tractoMarca = useMemo(() => {
+    const m = new Map();
+    for (const [pat, v] of flota.entries()) {
+      if (getCategoria(v.tipoequipo) !== "TRACTOCAMION") continue;
+      const marca = (v.marca || "").toUpperCase().trim();
+      if (marca.includes("SCANIA")) m.set(pat, "SCANIA");
+      else if (marca.includes("VOLVO")) m.set(pat, "VOLVO");
+      else m.set(pat, "OTRO");
+    }
+    return m;
+  }, [flota]);
+
+  // Rendimiento ponderado promedio
+  const rendPromedio = useMemo(() => {
+    let totalW = 0, count = 0;
+    for (const [, marca] of tractoMarca) {
+      totalW += REND[marca] || REND.OTRO;
+      count++;
+    }
+    return count > 0 ? (totalW / count) : REND.OTRO;
+  }, [tractoMarca]);
+
+  // Calcular KM por mes, sucursal y por marca de tracto
   const monthlyStats = useMemo(() => {
     const cutoff = new Date(today);
     cutoff.setMonth(cutoff.getMonth() - months);
     const filtered = data.filter(r => r._date >= cutoff && r.Cliente !== SIN_SOLICITUD);
 
-    // Por mes
     const byMonth = {};
     filtered.forEach(r => {
       const mk = getMonthKey(r._date);
-      if (!byMonth[mk]) byMonth[mk] = {km: 0, tramos: 0, tractos: new Set(), bySuc: {}};
+      if (!byMonth[mk]) byMonth[mk] = {km: 0, tramos: 0, tractos: new Set(), bySuc: {}, byMarca: {SCANIA:{km:0,tramos:0}, VOLVO:{km:0,tramos:0}, OTRO:{km:0,tramos:0}}};
       const km = Number(r.Kilometro) || 0;
       byMonth[mk].km += km;
       byMonth[mk].tramos++;
@@ -1360,6 +1387,11 @@ function Combustible({data, today, T}) {
       if (!byMonth[mk].bySuc[suc]) byMonth[mk].bySuc[suc] = {km: 0, tramos: 0};
       byMonth[mk].bySuc[suc].km += km;
       byMonth[mk].bySuc[suc].tramos++;
+
+      // Por marca
+      const marca = tractoMarca.get(r.Tracto) || "OTRO";
+      byMonth[mk].byMarca[marca].km += km;
+      byMonth[mk].byMarca[marca].tramos++;
     });
 
     const months_sorted = Object.keys(byMonth).sort();
@@ -1370,12 +1402,12 @@ function Combustible({data, today, T}) {
       tramos: byMonth[mk].tramos,
       tractos: byMonth[mk].tractos.size,
       kmPorTramo: byMonth[mk].tramos > 0 ? Math.round(byMonth[mk].km / byMonth[mk].tramos) : 0,
-      kmPorTracto: byMonth[mk].tractos.size > 0 ? Math.round(byMonth[mk].km / byMonth[mk].tractos.size) : 0,
       bySuc: byMonth[mk].bySuc,
+      byMarca: byMonth[mk].byMarca,
     }));
-  }, [data, today, months]);
+  }, [data, today, months, tractoMarca]);
 
-  // Sucursales disponibles en datos
+  // Sucursales disponibles
   const sucursalesDisp = useMemo(() => {
     const s = new Set();
     monthlyStats.forEach(m => Object.keys(m.bySuc).forEach(k => s.add(k)));
@@ -1393,17 +1425,24 @@ function Combustible({data, today, T}) {
 
   const maxKm = Math.max(...displayStats.map(m => m.km), 1);
 
-  // Estimación de consumo: estándar camión pesado ~2.5 km/litro
-  const KM_PER_LITER = 2.5;
+  // Calcular litros con rendimiento por marca
+  const calcLitrosMarca = useCallback((byMarca) => {
+    const sc = byMarca.SCANIA.km / REND.SCANIA;
+    const vo = byMarca.VOLVO.km / REND.VOLVO;
+    const ot = byMarca.OTRO.km / REND.OTRO;
+    return {scania: Math.round(sc), volvo: Math.round(vo), otro: Math.round(ot), total: Math.round(sc + vo + ot)};
+  }, []);
 
-  // Variación mes a mes
+  // Variación mes a mes con litros por marca
   const withDelta = displayStats.map((m, i) => {
     const prev = i > 0 ? displayStats[i - 1] : null;
+    const litrosMarca = calcLitrosMarca(m.byMarca || {SCANIA:{km:0},VOLVO:{km:0},OTRO:{km:0}});
     return {
       ...m,
       deltaKm: prev ? ((m.km - prev.km) / Math.max(prev.km, 1) * 100) : null,
-      deltaTramos: prev ? ((m.tramos - prev.tramos) / Math.max(prev.tramos, 1) * 100) : null,
-      litrosEst: Math.round(m.km / KM_PER_LITER),
+      litrosEst: litrosMarca.total,
+      litrosMarca,
+      costoEst: litrosMarca.total * precioDiesel,
     };
   });
 
@@ -1422,7 +1461,20 @@ function Combustible({data, today, T}) {
   const totalKm = withDelta.reduce((s, m) => s + m.km, 0);
   const totalTramos = withDelta.reduce((s, m) => s + m.tramos, 0);
   const totalLitros = withDelta.reduce((s, m) => s + m.litrosEst, 0);
+  const totalCosto = withDelta.reduce((s, m) => s + m.costoEst, 0);
   const avgKmMes = withDelta.length > 0 ? Math.round(totalKm / withDelta.length) : 0;
+
+  // Acumulado por marca (todo el período)
+  const marcaAcum = useMemo(() => {
+    const acc = {SCANIA:{km:0,tramos:0}, VOLVO:{km:0,tramos:0}, OTRO:{km:0,tramos:0}};
+    monthlyStats.forEach(m => {
+      for (const mk of ["SCANIA","VOLVO","OTRO"]) {
+        acc[mk].km += m.byMarca[mk].km;
+        acc[mk].tramos += m.byMarca[mk].tramos;
+      }
+    });
+    return acc;
+  }, [monthlyStats]);
 
   // Por sucursal acumulado
   const sucAcum = useMemo(() => {
@@ -1437,10 +1489,16 @@ function Combustible({data, today, T}) {
     return Object.entries(acc).sort((a, b) => b[1].km - a[1].km);
   }, [monthlyStats]);
 
+  const fmtM = (v) => {
+    if (v >= 1e9) return "$" + (v/1e9).toFixed(1) + "MM";
+    if (v >= 1e6) return "$" + Math.round(v/1e6).toLocaleString("es-CL") + "M";
+    return "$" + Math.round(v).toLocaleString("es-CL");
+  };
+
   return (<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
       <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⛽ Combustible y KM</h2>
-      <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"}}>
         <select value={filtroSuc} onChange={e => setFiltroSuc(e.target.value)} style={sel}>
           <option value="todas">Todas las sucursales</option>
           {sucursalesDisp.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1451,12 +1509,45 @@ function Combustible({data, today, T}) {
       </div>
     </div>
 
-    <div style={{background:T.sf2,border:`1px solid ${T.bd}`,borderRadius:"10px",padding:"8px 16px",marginBottom:"14px",fontSize:"11px",color:T.txM,display:"flex",alignItems:"center",gap:"8px"}}>
-      <span style={{fontSize:"14px"}}>💡</span>
-      <span>
-        Estimación de litros basada en rendimiento estándar de <strong style={{color:T.tx}}>{KM_PER_LITER} km/litro</strong> (camión pesado cargado).
-        KM excluyen viajes de remonta/vacío. Los litros son estimativos para análisis de tendencia.
-      </span>
+    {/* Panel editable: Precio Diésel + Rendimientos */}
+    <div style={{...card,borderLeft:`4px solid ${T.red}`,background:T.isDark?"#1a1518":T.sf}}>
+      <div style={{fontSize:"14px",fontWeight:700,marginBottom:"12px",color:T.tx}}>⛽ Parámetros de Costo Combustible</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:"16px",alignItems:"end"}}>
+        <div>
+          <label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px",display:"block",marginBottom:"4px"}}>PRECIO DIÉSEL ($/litro neto)</label>
+          <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
+            <span style={{fontSize:"16px",fontWeight:700,color:T.red}}>$</span>
+            <input type="number" value={precioDiesel} onChange={e => setPrecioDiesel(Math.max(0, Number(e.target.value) || 0))}
+              style={{...inputStyle,width:"130px",fontSize:"18px",fontWeight:700,color:T.red,textAlign:"right"}}
+              step={10} min={0}
+            />
+          </div>
+          <div style={{fontSize:"10px",color:T.txM,marginTop:"4px"}}>Edita para simular costos con distintos precios</div>
+        </div>
+        <div style={{background:T.sf2,borderRadius:"10px",padding:"14px",border:`1px solid ${T.bd}`}}>
+          <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"8px"}}>RENDIMIENTO POR MARCA (km/litro)</div>
+          <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:"20px",fontWeight:700,color:"#3b82f6"}}>{REND.SCANIA}</div>
+              <div style={{fontSize:"10px",color:T.txM}}>SCANIA</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:"20px",fontWeight:700,color:"#8b5cf6"}}>{REND.VOLVO}</div>
+              <div style={{fontSize:"10px",color:T.txM}}>VOLVO</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:"20px",fontWeight:700,color:T.txM}}>{REND.OTRO}</div>
+              <div style={{fontSize:"10px",color:T.txM}}>OTROS</div>
+            </div>
+          </div>
+          <div style={{fontSize:"10px",color:T.txM,marginTop:"6px"}}>Promedio ponderado flota: <strong style={{color:T.tx}}>{rendPromedio.toFixed(2)} km/lt</strong></div>
+        </div>
+        <div style={{background:`${T.red}0a`,borderRadius:"10px",padding:"14px",border:`1px solid ${T.red}33`}}>
+          <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"4px"}}>COSTO ESTIMADO PERÍODO</div>
+          <div style={{fontSize:"24px",fontWeight:700,color:T.red}}>{fmtM(totalCosto)}</div>
+          <div style={{fontSize:"10px",color:T.txM,marginTop:"2px"}}>{totalLitros.toLocaleString("es-CL")} litros × ${precioDiesel.toLocaleString("es-CL")}/lt</div>
+        </div>
+      </div>
     </div>
 
     {/* KPIs */}
@@ -1465,6 +1556,54 @@ function Combustible({data, today, T}) {
       <StatCard T={T} icon="📋" value={totalTramos.toLocaleString("es-CL")} label="Tramos"/>
       <StatCard T={T} icon="⛽" value={Math.round(totalLitros / 1000).toLocaleString("es-CL") + "K"} label="Litros Est." color={T.red}/>
       <StatCard T={T} icon="📊" value={avgKmMes.toLocaleString("es-CL")} label="KM Prom./Mes" color={T.blu}/>
+    </div>
+
+    {/* Consumo por marca */}
+    <div style={card}>
+      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"14px",color:T.tx}}>🚛 Consumo Estimado por Marca de Tracto</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"12px"}}>
+        {[
+          {marca:"SCANIA",color:"#3b82f6",rend:REND.SCANIA,data:marcaAcum.SCANIA},
+          {marca:"VOLVO",color:"#8b5cf6",rend:REND.VOLVO,data:marcaAcum.VOLVO},
+          {marca:"OTROS",color:T.txM,rend:REND.OTRO,data:marcaAcum.OTRO},
+        ].map(b => {
+          const litros = b.data.km > 0 ? Math.round(b.data.km / b.rend) : 0;
+          const costo = litros * precioDiesel;
+          const pctKm = totalKm > 0 ? (b.data.km / totalKm * 100) : 0;
+          return (
+            <div key={b.marca} style={{background:T.sf2,borderRadius:"10px",padding:"16px",border:`1px solid ${T.bd}`,borderTop:`3px solid ${b.color}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px"}}>
+                <span style={{fontSize:"13px",fontWeight:700,color:b.color}}>{b.marca}</span>
+                <span style={{fontSize:"10px",color:T.txM}}>{b.rend} km/lt</span>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
+                <div>
+                  <div style={{fontSize:"10px",color:T.txM}}>KM</div>
+                  <div style={{fontSize:"14px",fontWeight:700,color:T.tx}}>{Math.round(b.data.km / 1000).toLocaleString("es-CL")}K</div>
+                </div>
+                <div>
+                  <div style={{fontSize:"10px",color:T.txM}}>Tramos</div>
+                  <div style={{fontSize:"14px",fontWeight:700,color:T.tx}}>{b.data.tramos.toLocaleString("es-CL")}</div>
+                </div>
+                <div>
+                  <div style={{fontSize:"10px",color:T.txM}}>Litros Est.</div>
+                  <div style={{fontSize:"14px",fontWeight:700,color:T.red}}>{litros.toLocaleString("es-CL")}</div>
+                </div>
+                <div>
+                  <div style={{fontSize:"10px",color:T.txM}}>Costo Est.</div>
+                  <div style={{fontSize:"14px",fontWeight:700,color:T.red}}>{fmtM(costo)}</div>
+                </div>
+              </div>
+              <div style={{marginTop:"8px"}}>
+                <div style={{height:"6px",background:T.sf,borderRadius:"3px",border:`1px solid ${T.bd}`,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:pctKm+"%",background:b.color,borderRadius:"3px"}}/>
+                </div>
+                <div style={{fontSize:"9px",color:T.txM,marginTop:"2px",textAlign:"right"}}>{pctKm.toFixed(1)}% del KM total</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
 
     {/* Gráfico de barras por mes */}
@@ -1487,7 +1626,7 @@ function Combustible({data, today, T}) {
     </div>
 
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px",marginBottom:"16px"}}>
-      {/* Tabla mensual */}
+      {/* Tabla mensual con costo */}
       <div style={card}>
         <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>📊 Detalle por Mes</div>
         <div style={{maxHeight:"400px",overflowY:"auto",overflowX:"auto"}}>
@@ -1497,8 +1636,8 @@ function Combustible({data, today, T}) {
               <th style={thStyle}>KM</th>
               <th style={thStyle}>Δ</th>
               <th style={thStyle}>Tramos</th>
-              <th style={thStyle}>KM/Tramo</th>
-              <th style={thStyle}>Litros Est.</th>
+              <th style={thStyle}>Litros</th>
+              <th style={thStyle}>Costo Est.</th>
             </tr></thead>
             <tbody>{withDelta.map((m, i) => (
               <tr key={m.mes} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
@@ -1506,8 +1645,8 @@ function Combustible({data, today, T}) {
                 <td style={td}>{m.km.toLocaleString("es-CL")}</td>
                 <td style={td}><DeltaBadge val={m.deltaKm}/></td>
                 <td style={td}>{m.tramos.toLocaleString("es-CL")}</td>
-                <td style={td}>{m.kmPorTramo.toLocaleString("es-CL")}</td>
                 <td style={{...td,color:T.red,fontWeight:600}}>{m.litrosEst.toLocaleString("es-CL")}</td>
+                <td style={{...td,color:T.red,fontWeight:600}}>{fmtM(m.costoEst)}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -1519,14 +1658,15 @@ function Combustible({data, today, T}) {
         <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>🗺️ KM Acumulado por Sucursal</div>
         <div style={{maxHeight:"400px",overflowY:"auto"}}>
           {sucAcum.map(([s, v]) => {
+            const litros = Math.round(v.km / rendPromedio);
+            const costo = litros * precioDiesel;
             const pct = totalKm > 0 ? (v.km / totalKm * 100) : 0;
-            const litros = Math.round(v.km / KM_PER_LITER);
             return (
               <div key={s} style={{marginBottom:"10px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:"3px",alignItems:"center"}}>
                   <SucBadge s={s} T={T}/>
                   <span style={{fontSize:"11px",color:T.txM}}>
-                    {Math.round(v.km / 1000).toLocaleString("es-CL")}K km · {v.tramos.toLocaleString("es-CL")} tramos · ~{Math.round(litros / 1000).toLocaleString("es-CL")}K lt
+                    {Math.round(v.km / 1000).toLocaleString("es-CL")}K km · ~{Math.round(litros / 1000).toLocaleString("es-CL")}K lt · {fmtM(costo)}
                   </span>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
@@ -1729,7 +1869,7 @@ export default function App(){
       {view==="clientes"&&<StatsCliente data={data} today={today} T={T}/>}
       {view==="rutas"&&<StatsRuta data={data} today={today} T={T}/>}
       {view==="comparacion"&&<ComparacionMes data={data} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} today={today} T={T}/>}
-      {view==="combustible"&&<Combustible data={data} today={today} T={T}/>}
+      {view==="combustible"&&<Combustible data={data} flota={flota} tractoIdx={tractoIdx} today={today} T={T}/>}
       {view==="detalle"&&<Detalle data={data} T={T}/>}
       {view==="inventario"&&<Inventario flota={flota} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} ultimosMap={ultimosMap} today={today} T={T}/>}
     </main>
