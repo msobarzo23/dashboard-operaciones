@@ -6,7 +6,6 @@ const CSV_FLOTA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856GF
 const CSV_ULTIMOS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856GFyKLBBXGcgeUnkqttWGvFXbbeKDwGWoNDuBd0Tn9VJLDfRSezlD8zHi8Q_E6RlciYlT/pub?gid=1827964132&single=true&output=csv";
 
 const SIN_SOLICITUD = "-Viaje sin solicitud -";
-const RENDIMIENTO = { VOLVO: 2.8, SCANIA: 3.3 };
 
 const SUCURSAL_MAP = {
   "POZO ALMONTE": ["POZO ALMONTE","IQUIQUE","ALTO HOSPICIO","COLLAHUASI","QUEBRADA BLANCA","PICA","ARICA","PUERTO PATACHE","PUERTO IQUIQUE","NUDO URIBE","TALABRE"],
@@ -63,10 +62,6 @@ function cleanPatente(p){if(!p)return "";const s=String(p).trim().toUpperCase();
 function parseDate(str){if(!str)return null;if(str instanceof Date)return str;const[d,m,y]=String(str).split("/");if(!d||!m||!y)return null;return new Date(+y,+m-1,+d);}
 function formatDate(d){if(!d)return "-";return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();}
 function daysBetween(d1,d2){return Math.floor((d2-d1)/86400000);}
-function fNum(n){return Number(n||0).toLocaleString("es-CL");}
-function fPesos(n){return "$"+Number(Math.round(n||0)).toLocaleString("es-CL");}
-function getMarca(marcaStr){if(!marcaStr)return "OTRO";const m=marcaStr.toUpperCase().trim();if(m.includes("VOLVO"))return "VOLVO";if(m.includes("SCANIA"))return "SCANIA";return "OTRO";}
-
 
 function getEstadoEquipo(daysInactive) {
   if (daysInactive === null || daysInactive === undefined) return "SIN VIAJES";
@@ -176,13 +171,6 @@ function ThemeToggle({dark, onToggle}) {
       <span style={{fontSize:"15px"}}>{dark?"☀️":"🌙"}</span>
     </button>
   );
-}
-function VariationBadge({current,previous,T}){
-  if(previous===0||previous==null)return <span style={{color:T.txM,fontSize:"11px"}}>—</span>;
-  const pct=((current-previous)/previous*100);
-  const color = Math.abs(pct) < 3 ? T.txM : pct > 0 ? T.grn : T.red;
-  const arrow = pct > 0 ? "▲" : pct < 0 ? "▼" : "–";
-  return <span style={{color,fontSize:"12px",fontWeight:600}}>{arrow} {Math.abs(pct).toFixed(1)}%</span>;
 }
 
 // ═══ VIEW 1: BUSCADOR ═══
@@ -381,44 +369,6 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       totalR:flotaEquipos.size,
     };
   },[data,tractoIdx,ramplaIdx,flota,ultimosMap,today,days]);
-  const comparison = useMemo(() => {
-    if (!data.length || !data[0]._date) return null;
-    const maxDate = data[0]._date;
-    const dayOfMonth = maxDate.getDate();
-    const curMonth = maxDate.getMonth();
-    const curYear = maxDate.getFullYear();
-    const curStart = new Date(curYear, curMonth, 1);
-    const curEnd = new Date(curYear, curMonth, dayOfMonth, 23, 59, 59);
-    const prevMonth = curMonth === 0 ? 11 : curMonth - 1;
-    const prevYear = curMonth === 0 ? curYear - 1 : curYear;
-    const prevMaxDay = new Date(prevYear, prevMonth + 1, 0).getDate();
-    const prevCutDay = Math.min(dayOfMonth, prevMaxDay);
-    const prevStart = new Date(prevYear, prevMonth, 1);
-    const prevEnd = new Date(prevYear, prevMonth, prevCutDay, 23, 59, 59);
-    const monthNames = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
-    const curLabel = monthNames[curMonth] + " " + curYear;
-    const prevLabel = monthNames[prevMonth] + " " + prevYear;
-    const curData = data.filter(d => d._date && d._date >= curStart && d._date <= curEnd && d.Cliente !== SIN_SOLICITUD);
-    const prevData = data.filter(d => d._date && d._date >= prevStart && d._date <= prevEnd && d.Cliente !== SIN_SOLICITUD);
-    const curTrips = curData.length; const prevTrips = prevData.length;
-    const curKm = curData.reduce((s, r) => s + (Number(r.Kilometro) || 0), 0);
-    const prevKm = prevData.reduce((s, r) => s + (Number(r.Kilometro) || 0), 0);
-    const curTractos = new Set(curData.map(r => r.Tracto).filter(Boolean)).size;
-    const prevTractos = new Set(prevData.map(r => r.Tracto).filter(Boolean)).size;
-    const clientMap = (arr) => { const m = {}; arr.forEach(r => { if (r.Cliente) m[r.Cliente] = (m[r.Cliente] || 0) + 1; }); return m; };
-    const curClients = clientMap(curData); const prevClients = clientMap(prevData);
-    const allClients = new Set([...Object.keys(curClients), ...Object.keys(prevClients)]);
-    const clientComparison = [];
-    for (const c of allClients) { clientComparison.push({ cliente: c, cur: curClients[c] || 0, prev: prevClients[c] || 0 }); }
-    clientComparison.sort((a, b) => b.cur - a.cur);
-    const sucMap = (arr) => { const m = {}; arr.forEach(r => { const s = getSucursal(r.Destino); m[s] = (m[s] || 0) + 1; }); return m; };
-    const curSuc = sucMap(curData); const prevSuc = sucMap(prevData);
-    const allSuc = new Set([...Object.keys(curSuc), ...Object.keys(prevSuc)]);
-    const sucComparison = [];
-    for (const s of allSuc) { sucComparison.push({ suc: s, cur: curSuc[s] || 0, prev: prevSuc[s] || 0 }); }
-    sucComparison.sort((a, b) => b.cur - a.cur);
-    return { curLabel, prevLabel, dayOfMonth, prevCutDay, curTrips, prevTrips, curKm, prevKm, curTractos, prevTractos, clientComparison, sucComparison };
-  }, [data]);
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}}>
@@ -500,62 +450,7 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
     </div>
   </div>);
 }
-{comparison && (
-      <div style={card}>
-        <div style={{fontSize:"14px",fontWeight:700,marginBottom:"4px",color:T.tx}}>📅 Comparación: {comparison.curLabel} vs {comparison.prevLabel}</div>
-        <div style={{fontSize:"11px",color:T.txM,marginBottom:"16px"}}>Comparando primeros {comparison.dayOfMonth} días de {comparison.curLabel} contra primeros {comparison.prevCutDay} días de {comparison.prevLabel} · Excluye viajes vacíos/remonta</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:"12px",marginBottom:"20px"}}>
-          {[{label:"Viajes",cur:comparison.curTrips,prev:comparison.prevTrips,icon:"📋"},
-            {label:"KM Totales",cur:comparison.curKm,prev:comparison.prevKm,icon:"🛣️",fmt:v=>v>=1e3?Math.round(v/1e3).toLocaleString("es-CL")+"K":fNum(v)},
-            {label:"Tractos Activos",cur:comparison.curTractos,prev:comparison.prevTractos,icon:"🚛"},
-          ].map(kpi=>(
-            <div key={kpi.label} style={{background:T.sf2,border:`1px solid ${T.bd}`,borderRadius:"10px",padding:"16px",textAlign:"center"}}>
-              <div style={{fontSize:"11px",color:T.txM,marginBottom:"8px"}}>{kpi.icon} {kpi.label}</div>
-              <div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:"12px"}}>
-                <div><div style={{fontSize:"22px",fontWeight:700,color:T.ac}}>{kpi.fmt?kpi.fmt(kpi.cur):fNum(kpi.cur)}</div><div style={{fontSize:"9px",color:T.txM,textTransform:"uppercase"}}>{comparison.curLabel}</div></div>
-                <div style={{fontSize:"14px",color:T.txM}}>vs</div>
-                <div><div style={{fontSize:"18px",fontWeight:600,color:T.txS}}>{kpi.fmt?kpi.fmt(kpi.prev):fNum(kpi.prev)}</div><div style={{fontSize:"9px",color:T.txM,textTransform:"uppercase"}}>{comparison.prevLabel}</div></div>
-              </div>
-              <div style={{marginTop:"6px"}}><VariationBadge current={kpi.cur} previous={kpi.prev} T={T}/></div>
-            </div>
-          ))}
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
-          <div>
-            <div style={{fontSize:"13px",fontWeight:700,marginBottom:"10px",color:T.tx}}>Por Cliente (viajes)</div>
-            <div style={{maxHeight:"400px",overflowY:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
-                <thead><tr><th style={th}>Cliente</th><th style={{...th,textAlign:"right"}}>{comparison.curLabel}</th><th style={{...th,textAlign:"right"}}>{comparison.prevLabel}</th><th style={{...th,textAlign:"right"}}>Var.</th></tr></thead>
-                <tbody>{comparison.clientComparison.slice(0,20).map((r,i)=>(
-                  <tr key={r.cliente} style={{background:i%2?T.sf2:"transparent"}}>
-                    <td style={{...td,maxWidth:"180px",overflow:"hidden",textOverflow:"ellipsis"}}>{r.cliente}</td>
-                    <td style={{...td,textAlign:"right",fontWeight:600}}>{fNum(r.cur)}</td>
-                    <td style={{...td,textAlign:"right",color:T.txM}}>{fNum(r.prev)}</td>
-                    <td style={{...td,textAlign:"right"}}><VariationBadge current={r.cur} previous={r.prev} T={T}/></td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          </div>
-          <div>
-            <div style={{fontSize:"13px",fontWeight:700,marginBottom:"10px",color:T.tx}}>Por Sucursal (viajes)</div>
-            <div style={{maxHeight:"400px",overflowY:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
-                <thead><tr><th style={th}>Sucursal</th><th style={{...th,textAlign:"right"}}>{comparison.curLabel}</th><th style={{...th,textAlign:"right"}}>{comparison.prevLabel}</th><th style={{...th,textAlign:"right"}}>Var.</th></tr></thead>
-                <tbody>{comparison.sucComparison.map((r,i)=>(
-                  <tr key={r.suc} style={{background:i%2?T.sf2:"transparent"}}>
-                    <td style={td}><SucBadge s={r.suc} T={T}/></td>
-                    <td style={{...td,textAlign:"right",fontWeight:600}}>{fNum(r.cur)}</td>
-                    <td style={{...td,textAlign:"right",color:T.txM}}>{fNum(r.prev)}</td>
-                    <td style={{...td,textAlign:"right"}}><VariationBadge current={r.cur} previous={r.prev} T={T}/></td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    )}
+
 // ═══ PDF PRINT HELPER ═══
 function printReporte(rows, tipo, filtroEstado, filtroSuc, today) {
   const fecha = formatDate(today);
@@ -1217,76 +1112,11 @@ function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
     </div>
   </div>);
 }
-// ═══ VIEW 8: CONSUMO COMBUSTIBLE ═══
-function Combustible({data,tractoIdx,flota,today,T}){
-  const[months,setMonths]=useState(1);const[precioLitro,setPrecioLitro]=useState("");
-  const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
-  const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
-  const input={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"10px 14px",color:T.tx,fontSize:"14px",fontFamily:"inherit",outline:"none"};
-  const th={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf,whiteSpace:"nowrap"};
-  const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
-  const precio=parseFloat(String(precioLitro).replace(/\./g,"").replace(",","."))||0;
-  const stats=useMemo(()=>{
-    const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
-    const tractoData={};
-    for(const[pat,trips]of tractoIdx.entries()){const fi=flota.get(pat);if(!fi)continue;const cat=getCategoria(fi.tipoequipo);if(cat!=="TRACTOCAMION")continue;const marca=getMarca(fi.marca);let km=0;for(const t of trips){if(t._date<cutoff)break;if(t.Cliente!==SIN_SOLICITUD)km+=(Number(t.Kilometro)||0);}if(km>0)tractoData[pat]={pat,marca,modelo:fi.modelo,km};}
-    const all=Object.values(tractoData);const volvo=all.filter(x=>x.marca==="VOLVO");const scania=all.filter(x=>x.marca==="SCANIA");const otro=all.filter(x=>x.marca==="OTRO");
-    const sumKm=(arr)=>arr.reduce((s,x)=>s+x.km,0);
-    const volvoKm=sumKm(volvo);const scaniaKm=sumKm(scania);const otroKm=sumKm(otro);const totalKm=volvoKm+scaniaKm+otroKm;
-    const volvoLitros=volvoKm/RENDIMIENTO.VOLVO;const scaniaLitros=scaniaKm/RENDIMIENTO.SCANIA;
-    const otroLitros=otroKm>0?otroKm/((RENDIMIENTO.VOLVO+RENDIMIENTO.SCANIA)/2):0;const totalLitros=volvoLitros+scaniaLitros+otroLitros;
-    const topTractos=all.map(x=>({...x,litros:x.marca==="VOLVO"?x.km/RENDIMIENTO.VOLVO:x.marca==="SCANIA"?x.km/RENDIMIENTO.SCANIA:x.km/((RENDIMIENTO.VOLVO+RENDIMIENTO.SCANIA)/2)})).sort((a,b)=>b.litros-a.litros).slice(0,15);
-    return{volvo:{count:volvo.length,km:volvoKm,litros:volvoLitros,rend:RENDIMIENTO.VOLVO},scania:{count:scania.length,km:scaniaKm,litros:scaniaLitros,rend:RENDIMIENTO.SCANIA},otro:{count:otro.length,km:otroKm,litros:otroLitros},totalKm,totalLitros,totalTractos:all.length,topTractos};
-  },[data,tractoIdx,flota,today,months]);
-  const totalCosto=stats.totalLitros*precio;
-  return(<div>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
-      <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⛽ Consumo de Combustible</h2>
-      <select value={months} onChange={e=>setMonths(+e.target.value)} style={sel}><option value={1}>Último mes</option><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option><option value={99}>Todo</option></select>
-    </div>
-    <div style={card}>
-      <div style={{display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
-        <div style={{fontSize:"13px",fontWeight:600,color:T.tx}}>💰 Precio del Diésel (CLP/litro):</div>
-        <div style={{position:"relative"}}><span style={{position:"absolute",left:"12px",top:"50%",transform:"translateY(-50%)",color:T.txM,fontSize:"14px",fontWeight:600}}>$</span><input type="text" value={precioLitro} onChange={e=>setPrecioLitro(e.target.value)} placeholder="Ej: 850" style={{...input,paddingLeft:"28px",width:"150px"}}/></div>
-        {precio>0&&<span style={{fontSize:"12px",color:T.grn,fontWeight:600}}>✓ {fPesos(precio)}/litro</span>}
-        {!precio&&<span style={{fontSize:"11px",color:T.txM}}>Ingresa el precio para ver costos en pesos</span>}
-      </div>
-    </div>
-    <div style={{display:"flex",gap:"16px",marginBottom:"16px",flexWrap:"wrap"}}>
-      <StatCard value={fNum(Math.round(stats.totalLitros))} label="Litros Totales Estimados" icon="⛽" color={T.red} T={T}/>
-      <StatCard value={fNum(stats.totalKm)} label="KM Totales" icon="🛣️" color={T.ac} T={T}/>
-      <StatCard value={fNum(stats.totalTractos)} label="Tractos Activos" icon="🚛" color={T.blu} T={T}/>
-      {precio>0&&<StatCard value={totalCosto>=1e6?(totalCosto/1e6).toFixed(1)+"M":fPesos(totalCosto)} label="Costo Total Estimado" icon="💰" color={T.grn} T={T}/>}
-    </div>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px",marginBottom:"16px"}}>
-      {[{label:"VOLVO",data:stats.volvo,colorLight:"#3b82f6",icon:"🔵"},{label:"SCANIA",data:stats.scania,colorLight:"#ef4444",icon:"🔴"}].map(brand=>(
-        <div key={brand.label} style={{...card,borderTop:`4px solid ${brand.colorLight}`}}>
-          <div style={{fontSize:"15px",fontWeight:700,marginBottom:"14px",color:T.tx}}>{brand.icon} {brand.label}</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}}>
-            <div style={{background:T.sf2,borderRadius:"8px",padding:"12px",textAlign:"center",border:`1px solid ${T.bd}`}}><div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",marginBottom:"4px"}}>Tractos</div><div style={{fontSize:"20px",fontWeight:700,color:T.tx}}>{brand.data.count}</div></div>
-            <div style={{background:T.sf2,borderRadius:"8px",padding:"12px",textAlign:"center",border:`1px solid ${T.bd}`}}><div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",marginBottom:"4px"}}>Rendimiento</div><div style={{fontSize:"20px",fontWeight:700,color:T.ac}}>{brand.data.rend} km/L</div></div>
-            <div style={{background:T.sf2,borderRadius:"8px",padding:"12px",textAlign:"center",border:`1px solid ${T.bd}`}}><div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",marginBottom:"4px"}}>KM Recorridos</div><div style={{fontSize:"18px",fontWeight:700,color:T.tx}}>{fNum(brand.data.km)}</div></div>
-            <div style={{background:T.sf2,borderRadius:"8px",padding:"12px",textAlign:"center",border:`1px solid ${T.bd}`}}><div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",marginBottom:"4px"}}>Litros Estimados</div><div style={{fontSize:"18px",fontWeight:700,color:T.red}}>{fNum(Math.round(brand.data.litros))}</div></div>
-          </div>
-          {precio>0&&(<div style={{marginTop:"12px",background:`${brand.colorLight}15`,borderRadius:"8px",padding:"14px",textAlign:"center",border:`1px solid ${brand.colorLight}33`}}><div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",marginBottom:"4px"}}>Costo Estimado</div><div style={{fontSize:"22px",fontWeight:700,color:brand.colorLight}}>{fPesos(brand.data.litros*precio)}</div></div>)}
-        </div>
-      ))}
-    </div>
-    {stats.otro.count>0&&(<div style={{...card,marginBottom:"16px"}}><div style={{fontSize:"13px",fontWeight:700,color:T.tx,marginBottom:"8px"}}>📌 Otras Marcas ({stats.otro.count} tractos)</div><div style={{fontSize:"12px",color:T.txM}}>KM: {fNum(stats.otro.km)} · Litros estimados: {fNum(Math.round(stats.otro.litros))} (rendimiento promedio: {((RENDIMIENTO.VOLVO+RENDIMIENTO.SCANIA)/2).toFixed(1)} km/L){precio>0&&<span> · Costo: {fPesos(stats.otro.litros*precio)}</span>}</div></div>)}
-    <div style={card}><div style={{fontSize:"14px",fontWeight:700,marginBottom:"14px",color:T.tx}}>🏆 Top 15 Tractos por Consumo</div>
-      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
-        <thead><tr><th style={th}>#</th><th style={th}>Tracto</th><th style={th}>Marca</th><th style={th}>Modelo</th><th style={{...th,textAlign:"right"}}>KM</th><th style={{...th,textAlign:"right"}}>Litros Est.</th>{precio>0&&<th style={{...th,textAlign:"right"}}>Costo Est.</th>}</tr></thead>
-        <tbody>{stats.topTractos.map((r,i)=>(<tr key={r.pat} style={{background:i%2?T.sf2:"transparent"}}><td style={td}>{i+1}</td><td style={{...td,fontWeight:700}}>{r.pat}</td><td style={td}><span style={{padding:"2px 8px",borderRadius:"4px",fontSize:"11px",fontWeight:600,background:r.marca==="VOLVO"?`${T.blu}22`:r.marca==="SCANIA"?`${T.red}22`:`${T.txM}22`,color:r.marca==="VOLVO"?T.blu:r.marca==="SCANIA"?T.red:T.txM}}>{r.marca}</span></td><td style={td}>{r.modelo}</td><td style={{...td,textAlign:"right"}}>{fNum(r.km)}</td><td style={{...td,textAlign:"right",fontWeight:600,color:T.red}}>{fNum(Math.round(r.litros))}</td>{precio>0&&<td style={{...td,textAlign:"right",fontWeight:600,color:T.grn}}>{fPesos(r.litros*precio)}</td>}</tr>))}</tbody>
-      </table></div>
-    </div>
-  </div>);
-}
 
 // ═══ MAIN APP ═══
 const VIEWS=[
   {id:"buscar",label:"Buscador",icon:"🔍"},
   {id:"flota",label:"Estado Flota",icon:"📊"},
-  {id:"combustible",label:"Combustible",icon:"⛽"},
   {id:"inactivos",label:"Equipos",icon:"⚠️"},
   {id:"clientes",label:"Por Cliente",icon:"🏢"},
   {id:"rutas",label:"Por Ruta",icon:"🛤️"},
@@ -1434,7 +1264,6 @@ export default function App(){
     <main style={{maxWidth:"1400px",margin:"0 auto",padding:"24px"}}>
       {view==="buscar"&&<Buscador tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} today={today} T={T}/>}
       {view==="flota"&&<EstadoFlota data={data} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
-      {view==="combustible"&&<Combustible data={data} tractoIdx={tractoIdx} flota={flota} today={today} T={T}/>}
       {view==="inactivos"&&<Inactivos tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
       {view==="clientes"&&<StatsCliente data={data} today={today} T={T}/>}
       {view==="rutas"&&<StatsRuta data={data} today={today} T={T}/>}
