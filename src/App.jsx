@@ -310,10 +310,9 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
 
   // ─── COMPARACIÓN MES ACTUAL vs ANTERIOR (mismo corte) ───
   const comparison = useMemo(() => {
-    // Find the last date in the data
-    const allDates = data.filter(d => d._date).map(d => d._date);
-    if (!allDates.length) return null;
-    const maxDate = new Date(Math.max(...allDates));
+    // Find the last date in the data (data is already sorted desc by date)
+    if (!data.length || !data[0]._date) return null;
+    const maxDate = data[0]._date;
     const dayOfMonth = maxDate.getDate();
     const curMonth = maxDate.getMonth();
     const curYear = maxDate.getFullYear();
