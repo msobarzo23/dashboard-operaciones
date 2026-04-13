@@ -7,6 +7,17 @@ const CSV_ULTIMOS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856
 
 const SIN_SOLICITUD = "-Viaje sin solicitud -";
 
+// Detección centralizada de viajes vacíos/remonta/retorno
+// Criterios: (1) cliente = SIN_SOLICITUD, (2) cliente vacío/nulo, (3) carga contiene "VACIO"
+function isVacioTrip(row) {
+  if (!row) return false;
+  if (row.Cliente === SIN_SOLICITUD) return true;
+  if (!row.Cliente || row.Cliente.trim() === "") return true;
+  const carga = (row.Carga || "").toUpperCase().trim();
+  if (carga === "VACIO" || carga.startsWith("VACIO ") || carga.startsWith("VACIO(")) return true;
+  return false;
+}
+
 const SUCURSAL_MAP = {
   "POZO ALMONTE": ["POZO ALMONTE","IQUIQUE","ALTO HOSPICIO","COLLAHUASI","QUEBRADA BLANCA","PICA","ARICA","PUERTO PATACHE","PUERTO IQUIQUE","NUDO URIBE","TALABRE"],
   "MEJILLONES": ["MEJILLONES"],
@@ -214,7 +225,7 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
     {results&&results.length===0&&<div style={{...card,textAlign:"center",color:T.txM}}>Sin resultados para "{q}"</div>}
     {results&&results.map((r,i)=>{
       const last=r.tramos[0];const d=daysBetween(last._date,today);const suc=getSucursal(last.Destino);const fi=flota.get(r.pat);
-      const esSinSolicitud = last.Cliente === SIN_SOLICITUD;
+      const esSinSolicitud = isVacioTrip(last);
       return(<div key={i} style={{...card,borderLeft:`4px solid ${r.t==="TRACTO"?T.blu:T.ac}`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"12px",flexWrap:"wrap",gap:"8px"}}>
           <div>
@@ -253,7 +264,7 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
                 <th style={th}>Cliente</th><th style={th}>Carga</th><th style={th}>KM</th>
               </tr></thead>
               <tbody>{r.tramos.slice(0,15).map((t,j)=>{
-                const sinSol = t.Cliente === SIN_SOLICITUD;
+                const sinSol = isVacioTrip(t);
                 return(
                   <tr key={j} style={{background:j%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
                     <td style={td}>{t.Fecha}</td><td style={td}>{t.Origen}</td><td style={td}>{t.Destino}</td>
@@ -302,7 +313,7 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
         for(const t of tr){
           if(t._date<cutoff) break;
           hasRecent=true;
-          if(t.Cliente!==SIN_SOLICITUD){
+          if(!isVacioTrip(t)){
             totalKm+=(Number(t.Kilometro)||0);
             totalTrips++;
           }
@@ -336,7 +347,7 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       if(flotaTractos.has(pat)) continue;
       for(const t of tr){
         if(t._date<cutoff) break;
-        if(t.Cliente!==SIN_SOLICITUD){
+        if(!isVacioTrip(t)){
           totalKm+=(Number(t.Kilometro)||0);
           totalTrips++;
         }
@@ -347,7 +358,7 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       let km=0;
       for(const t of tr){
         if(t._date<cutoff) break;
-        if(t.Cliente!==SIN_SOLICITUD) km+=(Number(t.Kilometro)||0);
+        if(!isVacioTrip(t)) km+=(Number(t.Kilometro)||0);
       }
       if(km>0)tKm.push([k,km]);
     }
@@ -453,7 +464,7 @@ function printReporte(rows, tipo, filtroEstado, filtroSuc, today) {
   const EC = { "ACTIVO":"#16a34a","INACTIVO":"#d97706","PARADO":"#dc2626","SIN VIAJES":"#94a3b8" };
   const filas = rows.map((r, i) => {
     const ec = EC[r.estado] || "#64748b";
-    const esSinSol = r.lastRecord?.Cliente === SIN_SOLICITUD;
+    const esSinSol = isVacioTrip(r.lastRecord);
     return `<tr style="background:${i%2===0?"#fff":"#f8fafc"}">
       <td>${r.pat}</td>
       <td style="color:${ec};font-weight:700">${r.days !== null ? r.days + "d" : "—"}</td>
@@ -547,7 +558,7 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       }
       const days=lastDate?daysBetween(lastDate,today):null;
       const estado=getEstadoEquipo(days);
-      const esSinSol = lastRecord?.Cliente === SIN_SOLICITUD;
+      const esSinSol = isVacioTrip(lastRecord);
       res.push({pat,days,lastRecord,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS",fi,estado,enCatalogo:true,"lastRecord.Fecha":lastRecord?.Fecha||"","fi.tipoequipo":fi.tipoequipo||"",esSinSol});
     }
     if(!soloDoc){
@@ -557,7 +568,7 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
         const days=daysBetween(lastDate,today);
         const last=tr[0];
         const estado=getEstadoEquipo(days);
-        const esSinSol = last.Cliente === SIN_SOLICITUD;
+        const esSinSol = isVacioTrip(last);
         res.push({pat,days,lastRecord:last,suc:getSucursal(last.Destino),fi:null,estado,enCatalogo:false,"lastRecord.Fecha":last.Fecha||"","fi.tipoequipo":"",esSinSol});
       }
     }
@@ -750,7 +761,7 @@ function StatsCliente({data,today,T}){
     const allFiltered = months===99 ? data : data.filter(d=>d._date>=cutoff);
 
     // Stats de viajes vacíos/remonta (SIN_SOLICITUD)
-    const vacios = allFiltered.filter(d => d.Cliente === SIN_SOLICITUD);
+    const vacios = allFiltered.filter(d => isVacioTrip(d));
     const vacioKm = vacios.reduce((s, d) => s + (Number(d.Kilometro) || 0), 0);
     const vacioTramos = vacios.length;
 
@@ -765,7 +776,7 @@ function StatsCliente({data,today,T}){
     const topRutasVacias = Object.values(rutasVacias).sort((a, b) => b.km - a.km).slice(0, 5);
 
     // Stats de clientes reales (excluye vacíos)
-    const filtered = allFiltered.filter(d => d.Cliente !== SIN_SOLICITUD);
+    const filtered = allFiltered.filter(d => !isVacioTrip(d));
     const byC={};
     filtered.forEach(d=>{const c=d.Cliente;if(!byC[c])byC[c]={cliente:c,km:0,tramos:0,sols:new Set(),cargas:{}};byC[c].km+=Number(d.Kilometro)||0;byC[c].tramos++;if(d.Solicitud)byC[c].sols.add(d.Solicitud);const cg=d.Carga?.trim();if(cg&&!/^\d+$/.test(cg))byC[c].cargas[cg]=(byC[c].cargas[cg]||0)+1;});
     const clienteStats = Object.values(byC).map(c=>({...c,sols:c.sols.size,topCargas:Object.entries(c.cargas).sort((a,b)=>b[1]-a[1]).slice(0,3)}));
@@ -914,7 +925,7 @@ function StatsRuta({data,today,T}){
   const rawStats=useMemo(()=>{
     const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
     const filtered=(months===99?data:data.filter(d=>d._date>=cutoff))
-      .filter(d=>d.Cliente!==SIN_SOLICITUD);
+      .filter(d=>!isVacioTrip(d));
     const byR={};
     filtered.forEach(d=>{const k=d.Origen+" → "+d.Destino;if(!byR[k])byR[k]={ruta:k,o:d.Origen,d:d.Destino,km:0,count:0,cls:new Set(),cargas:{}};byR[k].km+=Number(d.Kilometro)||0;byR[k].count++;byR[k].cls.add(d.Cliente);const cg=d.Carga?.trim();if(cg&&!/^\d+$/.test(cg))byR[k].cargas[cg]=(byR[k].cargas[cg]||0)+1;});
     return Object.values(byR).filter(r=>r.count>=minTrips).map(r=>({...r,avg:Math.round(r.km/r.count),cls:r.cls.size,topCarga:Object.entries(r.cargas).sort((a,b)=>b[1]-a[1])[0]?.[0]||"-"}));
@@ -970,7 +981,7 @@ function Detalle({data,T}){
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
   const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
 
-  const dataFiltrada = useMemo(()=>data.filter(d=>d.Cliente!==SIN_SOLICITUD),[data]);
+  const dataFiltrada = useMemo(()=>data.filter(d=>!isVacioTrip(d)),[data]);
 
   const cls=useMemo(()=>[...new Set(dataFiltrada.map(d=>d.Cliente))].sort(),[dataFiltrada]);
   const cgs=useMemo(()=>[...new Set(dataFiltrada.map(d=>d.Carga?.trim()).filter(c=>c&&!/^\d+$/.test(c)))].sort(),[dataFiltrada]);
@@ -1075,7 +1086,7 @@ function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
       const daysI=lastDate?daysBetween(lastDate,today):null;
       const age=v.fecha?(today.getFullYear()-parseInt(v.fecha)):null;
       const estado=getEstadoEquipo(daysI);
-      const esSinSol = lastTrip?.Cliente === SIN_SOLICITUD;
+      const esSinSol = isVacioTrip(lastTrip);
       arr.push({pat,...v,cat,lastTrip,daysI,age,estado,esSinSol});
     }
     return arr;
@@ -1219,7 +1230,7 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
   const [vistaDetalle, setVistaDetalle] = useState("clientes");
 
   const calcStats = useCallback((rows) => {
-    const real = rows.filter(r => r.Cliente !== SIN_SOLICITUD);
+    const real = rows.filter(r => !isVacioTrip(r));
     const km = real.reduce((s, r) => s + (Number(r.Kilometro) || 0), 0);
     const tramos = real.length;
     const solicitudes = new Set(real.map(r => r.Solicitud).filter(Boolean)).size;
@@ -1457,15 +1468,15 @@ function Combustible({data, flota, tractoIdx, today, T}) {
     let filtered;
     if (months === 0) {
       const mk = getMonthKey(today);
-      filtered = data.filter(r => getMonthKey(r._date) === mk && r.Cliente !== SIN_SOLICITUD);
+      filtered = data.filter(r => getMonthKey(r._date) === mk && !isVacioTrip(r));
     } else if (months === -1) {
       const prev = new Date(today.getFullYear(), today.getMonth() - 1, 1);
       const mk = getMonthKey(prev);
-      filtered = data.filter(r => getMonthKey(r._date) === mk && r.Cliente !== SIN_SOLICITUD);
+      filtered = data.filter(r => getMonthKey(r._date) === mk && !isVacioTrip(r));
     } else {
       const cutoff = new Date(today);
       cutoff.setMonth(cutoff.getMonth() - months);
-      filtered = data.filter(r => r._date >= cutoff && r.Cliente !== SIN_SOLICITUD);
+      filtered = data.filter(r => r._date >= cutoff && !isVacioTrip(r));
     }
     const byMonth = {};
     filtered.forEach(r => {
@@ -1865,7 +1876,7 @@ export default function App(){
             });
           }
 
-          const rowsConSolicitud = rows.filter(r=>r.Cliente!==SIN_SOLICITUD);
+          const rowsConSolicitud = rows.filter(r=>!isVacioTrip(r));
           setInfo({
             total:rows.length,
             minDate:minD?formatDate(minD):"-",
