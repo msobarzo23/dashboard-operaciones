@@ -433,9 +433,9 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
           <thead><tr><th style={th}>#</th><th style={th}>Tracto</th><th style={th}>KM</th></tr></thead>
           <tbody>{stats.topT.map(([t,km],i)=>(
             <tr key={t} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
-              <td style={td}>{i+1}</td>
-              <td style={{...td,fontWeight:600}}>{t}</td>
-              <td style={td}>{km.toLocaleString("es-CL")}</td>
+              <td style={{padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx}}>{i+1}</td>
+              <td style={{padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontWeight:600}}>{t}</td>
+              <td style={{padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx}}>{km.toLocaleString("es-CL")}</td>
             </tr>
           ))}</tbody>
         </table>
@@ -736,7 +736,7 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   </div>);
 }
 
-// ═══ VIEW 4: POR CLIENTE ═══
+// ═══ VIEW 4: POR CLIENTE (HÍBRIDO — tarjeta vacíos + ranking limpio) ═══
 function StatsCliente({data,today,T}){
   const[months,setMonths]=useState(1);const[sortBy,setSortBy]=useState("km");
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
@@ -744,25 +744,130 @@ function StatsCliente({data,today,T}){
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
   const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
 
-  const rawStats=useMemo(()=>{
+  // Calcular stats de clientes Y stats de vacíos por separado
+  const {rawStats, vacioStats, totalKmConVacios} = useMemo(()=>{
     const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
-    const filtered=(months===99?data:data.filter(d=>d._date>=cutoff))
-      .filter(d=>d.Cliente!==SIN_SOLICITUD);
+    const allFiltered = months===99 ? data : data.filter(d=>d._date>=cutoff);
+
+    // Stats de viajes vacíos/remonta (SIN_SOLICITUD)
+    const vacios = allFiltered.filter(d => d.Cliente === SIN_SOLICITUD);
+    const vacioKm = vacios.reduce((s, d) => s + (Number(d.Kilometro) || 0), 0);
+    const vacioTramos = vacios.length;
+
+    // Top rutas vacías
+    const rutasVacias = {};
+    vacios.forEach(d => {
+      const k = d.Origen + " → " + d.Destino;
+      if (!rutasVacias[k]) rutasVacias[k] = {ruta: k, km: 0, count: 0};
+      rutasVacias[k].km += Number(d.Kilometro) || 0;
+      rutasVacias[k].count++;
+    });
+    const topRutasVacias = Object.values(rutasVacias).sort((a, b) => b.km - a.km).slice(0, 5);
+
+    // Stats de clientes reales (excluye vacíos)
+    const filtered = allFiltered.filter(d => d.Cliente !== SIN_SOLICITUD);
     const byC={};
     filtered.forEach(d=>{const c=d.Cliente;if(!byC[c])byC[c]={cliente:c,km:0,tramos:0,sols:new Set(),cargas:{}};byC[c].km+=Number(d.Kilometro)||0;byC[c].tramos++;if(d.Solicitud)byC[c].sols.add(d.Solicitud);const cg=d.Carga?.trim();if(cg&&!/^\d+$/.test(cg))byC[c].cargas[cg]=(byC[c].cargas[cg]||0)+1;});
-    return Object.values(byC).map(c=>({...c,sols:c.sols.size,topCargas:Object.entries(c.cargas).sort((a,b)=>b[1]-a[1]).slice(0,3)}));
+    const clienteStats = Object.values(byC).map(c=>({...c,sols:c.sols.size,topCargas:Object.entries(c.cargas).sort((a,b)=>b[1]-a[1]).slice(0,3)}));
+
+    // KM total incluyendo vacíos (para calcular % real sobre el total)
+    const totalConVacios = clienteStats.reduce((s, c) => s + c.km, 0) + vacioKm;
+
+    return {
+      rawStats: clienteStats,
+      vacioStats: {km: vacioKm, tramos: vacioTramos, topRutas: topRutasVacias},
+      totalKmConVacios: totalConVacios,
+    };
   },[data,today,months]);
 
   const{sorted,sortKey,sortDir,toggle}=useSortable(rawStats,sortBy,"desc");
-  const totalKm=rawStats.reduce((s,c)=>s+c.km,0);
+  const totalKmClientes=rawStats.reduce((s,c)=>s+c.km,0);
+
+  const pctVacio = totalKmConVacios > 0 ? (vacioStats.km / totalKmConVacios * 100) : 0;
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
       <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>🏢 Estadísticas por Cliente</h2>
       <select value={months} onChange={e=>setMonths(+e.target.value)} style={sel}><option value={1}>1 mes</option><option value={2}>2 meses</option><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>1 año</option><option value={99}>Todo</option></select>
     </div>
+
+    {/* ── TARJETA RESUMEN KM VACÍOS / RETORNO ── */}
+    {vacioStats.tramos > 0 && (
+      <div style={{
+        background: T.isDark ? "#1a1820" : "#fefce8",
+        border: `1px solid ${T.isDark ? "#3d3520" : "#fde68a"}`,
+        borderLeft: `4px solid ${T.ac}`,
+        borderRadius: "12px",
+        padding: "20px",
+        marginBottom: "16px",
+        boxShadow: T.cardShadow,
+      }}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:"16px"}}>
+          <div style={{flex:"1",minWidth:"280px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"10px"}}>
+              <span style={{fontSize:"18px"}}>🔄</span>
+              <span style={{fontSize:"15px",fontWeight:700,color:T.tx}}>KM Vacíos / Retorno</span>
+              <span style={{
+                padding:"3px 10px",borderRadius:"20px",fontSize:"10px",fontWeight:700,
+                background:`${T.ac}22`,color:T.ac,border:`1px solid ${T.ac}44`,
+              }}>No incluidos en el ranking</span>
+            </div>
+            <div style={{fontSize:"11px",color:T.txM,marginBottom:"14px",lineHeight:1.6}}>
+              Viajes de remonta y retorno vacío (sin cliente asignado). Estos kilómetros representan el costo operacional
+              de reposicionamiento de equipos y no se contabilizan en el ranking de clientes.
+            </div>
+            <div style={{display:"flex",gap:"20px",flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>KM VACÍOS</div>
+                <div style={{fontSize:"24px",fontWeight:700,color:T.ac}}>{vacioStats.km.toLocaleString("es-CL")}</div>
+              </div>
+              <div>
+                <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>TRAMOS</div>
+                <div style={{fontSize:"24px",fontWeight:700,color:T.tx}}>{vacioStats.tramos.toLocaleString("es-CL")}</div>
+              </div>
+              <div>
+                <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>% DEL KM TOTAL</div>
+                <div style={{fontSize:"24px",fontWeight:700,color:pctVacio > 30 ? T.red : T.ac}}>{pctVacio.toFixed(1)}%</div>
+              </div>
+              <div>
+                <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>KM PROM./TRAMO</div>
+                <div style={{fontSize:"24px",fontWeight:700,color:T.txS}}>{vacioStats.tramos > 0 ? Math.round(vacioStats.km / vacioStats.tramos).toLocaleString("es-CL") : "—"}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Barra visual vacíos vs comerciales */}
+          <div style={{minWidth:"200px",flex:"0 0 240px"}}>
+            <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"8px"}}>DISTRIBUCIÓN KM TOTAL</div>
+            <div style={{height:"24px",background:T.sf2,borderRadius:"8px",overflow:"hidden",border:`1px solid ${T.bd}`,display:"flex"}}>
+              <div style={{height:"100%",width:((totalKmClientes / totalKmConVacios) * 100)+"%",background:`linear-gradient(90deg,${T.grn},${T.blu})`,transition:"width 0.3s"}} title="KM Comerciales"/>
+              <div style={{height:"100%",width:(pctVacio)+"%",background:`repeating-linear-gradient(45deg,${T.ac},${T.ac} 4px,${T.ac}88 4px,${T.ac}88 8px)`,transition:"width 0.3s"}} title="KM Vacíos"/>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:"6px",fontSize:"10px",color:T.txM}}>
+              <span><span style={{display:"inline-block",width:"8px",height:"8px",borderRadius:"2px",background:T.grn,marginRight:"4px",verticalAlign:"middle"}}/>Comercial ({(100 - pctVacio).toFixed(1)}%)</span>
+              <span><span style={{display:"inline-block",width:"8px",height:"8px",borderRadius:"2px",background:T.ac,marginRight:"4px",verticalAlign:"middle"}}/>Vacío ({pctVacio.toFixed(1)}%)</span>
+            </div>
+
+            {/* Top rutas vacías */}
+            {vacioStats.topRutas.length > 0 && (
+              <div style={{marginTop:"14px"}}>
+                <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"6px"}}>TOP RUTAS VACÍAS</div>
+                {vacioStats.topRutas.map((r, i) => (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",fontSize:"11px",borderBottom:i < vacioStats.topRutas.length - 1 ? `1px solid ${T.bd}` : "none"}}>
+                    <span style={{color:T.tx,maxWidth:"160px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.ruta}</span>
+                    <span style={{color:T.txM,whiteSpace:"nowrap",marginLeft:"8px"}}>{r.km.toLocaleString("es-CL")} km</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── TABLA RANKING CLIENTES (sin vacíos) ── */}
     <div style={card}>
-      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar · Excluye viajes de remonta/vacío</div>
+      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar · Excluye viajes de remonta/vacío · % calculado sobre KM comerciales</div>
       <div style={{maxHeight:"500px",overflowY:"auto",overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
           <thead><tr>
@@ -782,9 +887,9 @@ function StatsCliente({data,today,T}){
               <td style={td}>
                 <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
                   <div style={{width:"60px",height:"5px",background:T.sf2,borderRadius:"3px",border:`1px solid ${T.bd}`}}>
-                    <div style={{height:"100%",width:(totalKm?(c.km/totalKm*100):0)+"%",background:T.ac,borderRadius:"3px"}}/>
+                    <div style={{height:"100%",width:(totalKmClientes?(c.km/totalKmClientes*100):0)+"%",background:T.ac,borderRadius:"3px"}}/>
                   </div>
-                  <span style={{color:T.txM}}>{totalKm?(c.km/totalKm*100).toFixed(1):0}%</span>
+                  <span style={{color:T.txM}}>{totalKmClientes?(c.km/totalKmClientes*100).toFixed(1):0}%</span>
                 </div>
               </td>
               <td style={td}>{c.tramos.toLocaleString("es-CL")}</td>
@@ -1100,7 +1205,6 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
   const thStyle = {textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
   const td = {padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
 
-  // Obtener meses disponibles
   const availableMonths = useMemo(() => {
     const set = new Set();
     for (const r of data) {
@@ -1112,9 +1216,8 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
 
   const [mesA, setMesA] = useState(() => availableMonths[1] || "");
   const [mesB, setMesB] = useState(() => availableMonths[0] || "");
-  const [vistaDetalle, setVistaDetalle] = useState("clientes"); // clientes | sucursales | rutas
+  const [vistaDetalle, setVistaDetalle] = useState("clientes");
 
-  // Calcular stats para un mes dado
   const calcStats = useCallback((rows) => {
     const real = rows.filter(r => r.Cliente !== SIN_SOLICITUD);
     const km = real.reduce((s, r) => s + (Number(r.Kilometro) || 0), 0);
@@ -1123,8 +1226,6 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
     const tractos = new Set(real.map(r => r.Tracto).filter(Boolean)).size;
     const ramplas = new Set(real.map(r => r.Rampla).filter(Boolean)).size;
     const clientes = new Set(real.map(r => r.Cliente).filter(Boolean)).size;
-
-    // Por cliente
     const byCliente = {};
     real.forEach(r => {
       const c = r.Cliente;
@@ -1132,8 +1233,6 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
       byCliente[c].km += Number(r.Kilometro) || 0;
       byCliente[c].tramos++;
     });
-
-    // Por sucursal (destino)
     const bySuc = {};
     real.forEach(r => {
       const s = getSucursal(r.Destino);
@@ -1141,8 +1240,6 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
       bySuc[s].km += Number(r.Kilometro) || 0;
       bySuc[s].tramos++;
     });
-
-    // Por ruta
     const byRuta = {};
     real.forEach(r => {
       const k = r.Origen + " → " + r.Destino;
@@ -1150,10 +1247,7 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
       byRuta[k].km += Number(r.Kilometro) || 0;
       byRuta[k].tramos++;
     });
-
-    // KM promedio por tramo
     const kmPromedio = tramos > 0 ? Math.round(km / tramos) : 0;
-
     return {km, tramos, solicitudes, tractos, ramplas, clientes, kmPromedio, byCliente, bySuc, byRuta, totalRows: rows.length};
   }, []);
 
@@ -1183,7 +1277,6 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
     );
   };
 
-  // Barras horizontales comparativas
   const CompBar = ({valA, valB, maxVal, colorA, colorB}) => {
     const pA = maxVal > 0 ? (valA / maxVal * 100) : 0;
     const pB = maxVal > 0 ? (valB / maxVal * 100) : 0;
@@ -1199,14 +1292,12 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
     );
   };
 
-  // Resumen comparado para un detalle (clientes, sucursales, rutas)
   const detalleData = useMemo(() => {
     if (!statsA || !statsB) return [];
     let mapA, mapB;
     if (vistaDetalle === "clientes") { mapA = statsA.byCliente; mapB = statsB.byCliente; }
     else if (vistaDetalle === "sucursales") { mapA = statsA.bySuc; mapB = statsB.bySuc; }
     else { mapA = statsA.byRuta; mapB = statsB.byRuta; }
-
     const keys = new Set([...Object.keys(mapA), ...Object.keys(mapB)]);
     const arr = [];
     for (const k of keys) {
@@ -1266,7 +1357,6 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
       </span>
     </div>
 
-    {/* Tarjetas métricas */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:"12px",marginBottom:"16px"}}>
       {metrics.map(m => {
         const d = delta(m.vB, m.vA);
@@ -1286,7 +1376,6 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
       })}
     </div>
 
-    {/* Detalle comparativo */}
     <div style={card}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px",flexWrap:"wrap",gap:"8px"}}>
         <div style={{fontSize:"14px",fontWeight:600,color:T.tx}}>📊 Detalle Comparativo</div>
@@ -1338,26 +1427,23 @@ function Combustible({data, flota, tractoIdx, today, T}) {
   const thStyle = {textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
   const td = {padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
 
-  const [months, setMonths] = useState(0); // 0 = mes actual
+  const [months, setMonths] = useState(0);
   const [filtroSuc, setFiltroSuc] = useState("todas");
-  const [precioDiesel, setPrecioDiesel] = useState(1244); // $/litro neto default post-alza marzo 2026
+  const [precioDiesel, setPrecioDiesel] = useState(1244);
 
-  // Rendimientos por marca (km/litro) — solo Scania y Volvo (únicas marcas de tracto en flota)
   const REND = {SCANIA: 3.3, VOLVO: 2.8};
 
-  // Construir mapa tracto → marca (desde flota)
   const tractoMarca = useMemo(() => {
     const m = new Map();
     for (const [pat, v] of flota.entries()) {
       if (getCategoria(v.tipoequipo) !== "TRACTOCAMION") continue;
       const marca = (v.marca || "").toUpperCase().trim();
       if (marca.includes("SCANIA")) m.set(pat, "SCANIA");
-      else m.set(pat, "VOLVO"); // Volvo es la marca dominante; tractos sin marca conocida se asignan acá
+      else m.set(pat, "VOLVO");
     }
     return m;
   }, [flota]);
 
-  // Rendimiento ponderado promedio
   const rendPromedio = useMemo(() => {
     let totalW = 0, count = 0;
     for (const [, marca] of tractoMarca) {
@@ -1367,15 +1453,12 @@ function Combustible({data, flota, tractoIdx, today, T}) {
     return count > 0 ? (totalW / count) : REND.VOLVO;
   }, [tractoMarca]);
 
-  // Calcular KM por mes, sucursal y por marca de tracto
   const monthlyStats = useMemo(() => {
     let filtered;
     if (months === 0) {
-      // Mes actual
       const mk = getMonthKey(today);
       filtered = data.filter(r => getMonthKey(r._date) === mk && r.Cliente !== SIN_SOLICITUD);
     } else if (months === -1) {
-      // Mes anterior
       const prev = new Date(today.getFullYear(), today.getMonth() - 1, 1);
       const mk = getMonthKey(prev);
       filtered = data.filter(r => getMonthKey(r._date) === mk && r.Cliente !== SIN_SOLICITUD);
@@ -1384,7 +1467,6 @@ function Combustible({data, flota, tractoIdx, today, T}) {
       cutoff.setMonth(cutoff.getMonth() - months);
       filtered = data.filter(r => r._date >= cutoff && r.Cliente !== SIN_SOLICITUD);
     }
-
     const byMonth = {};
     filtered.forEach(r => {
       const mk = getMonthKey(r._date);
@@ -1393,39 +1475,28 @@ function Combustible({data, flota, tractoIdx, today, T}) {
       byMonth[mk].km += km;
       byMonth[mk].tramos++;
       if (r.Tracto) byMonth[mk].tractos.add(r.Tracto);
-
       const suc = getSucursal(r.Destino);
       if (!byMonth[mk].bySuc[suc]) byMonth[mk].bySuc[suc] = {km: 0, tramos: 0};
       byMonth[mk].bySuc[suc].km += km;
       byMonth[mk].bySuc[suc].tramos++;
-
-      // Por marca — solo Scania y Volvo
       const marca = tractoMarca.get(r.Tracto) || "VOLVO";
       byMonth[mk].byMarca[marca].km += km;
       byMonth[mk].byMarca[marca].tramos++;
     });
-
     const months_sorted = Object.keys(byMonth).sort();
     return months_sorted.map(mk => ({
-      mes: mk,
-      label: monthKeyToLabel(mk),
-      km: byMonth[mk].km,
-      tramos: byMonth[mk].tramos,
-      tractos: byMonth[mk].tractos.size,
-      kmPorTramo: byMonth[mk].tramos > 0 ? Math.round(byMonth[mk].km / byMonth[mk].tramos) : 0,
-      bySuc: byMonth[mk].bySuc,
-      byMarca: byMonth[mk].byMarca,
+      mes: mk, label: monthKeyToLabel(mk), km: byMonth[mk].km, tramos: byMonth[mk].tramos,
+      tractos: byMonth[mk].tractos.size, kmPorTramo: byMonth[mk].tramos > 0 ? Math.round(byMonth[mk].km / byMonth[mk].tramos) : 0,
+      bySuc: byMonth[mk].bySuc, byMarca: byMonth[mk].byMarca,
     }));
   }, [data, today, months, tractoMarca]);
 
-  // Sucursales disponibles
   const sucursalesDisp = useMemo(() => {
     const s = new Set();
     monthlyStats.forEach(m => Object.keys(m.bySuc).forEach(k => s.add(k)));
     return [...s].sort();
   }, [monthlyStats]);
 
-  // Datos filtrados por sucursal
   const displayStats = useMemo(() => {
     if (filtroSuc === "todas") return monthlyStats;
     return monthlyStats.map(m => {
@@ -1436,22 +1507,19 @@ function Combustible({data, flota, tractoIdx, today, T}) {
 
   const maxKm = Math.max(...displayStats.map(m => m.km), 1);
 
-  // Calcular litros con rendimiento por marca
   const calcLitrosMarca = useCallback((byMarca) => {
     const sc = (byMarca.SCANIA?.km || 0) / REND.SCANIA;
     const vo = (byMarca.VOLVO?.km || 0) / REND.VOLVO;
     return {scania: Math.round(sc), volvo: Math.round(vo), total: Math.round(sc + vo)};
   }, []);
 
-  // Variación mes a mes con litros por marca
   const withDelta = displayStats.map((m, i) => {
     const prev = i > 0 ? displayStats[i - 1] : null;
     const litrosMarca = calcLitrosMarca(m.byMarca || {SCANIA:{km:0},VOLVO:{km:0}});
     return {
       ...m,
       deltaKm: prev ? ((m.km - prev.km) / Math.max(prev.km, 1) * 100) : null,
-      litrosEst: litrosMarca.total,
-      litrosMarca,
+      litrosEst: litrosMarca.total, litrosMarca,
       costoEst: litrosMarca.total * precioDiesel,
     };
   });
@@ -1467,14 +1535,12 @@ function Combustible({data, flota, tractoIdx, today, T}) {
     );
   };
 
-  // Totales
   const totalKm = withDelta.reduce((s, m) => s + m.km, 0);
   const totalTramos = withDelta.reduce((s, m) => s + m.tramos, 0);
   const totalLitros = withDelta.reduce((s, m) => s + m.litrosEst, 0);
   const totalCosto = withDelta.reduce((s, m) => s + m.costoEst, 0);
   const avgKmMes = withDelta.length > 0 ? Math.round(totalKm / withDelta.length) : 0;
 
-  // Acumulado por marca (todo el período)
   const marcaAcum = useMemo(() => {
     const acc = {SCANIA:{km:0,tramos:0}, VOLVO:{km:0,tramos:0}};
     monthlyStats.forEach(m => {
@@ -1486,7 +1552,6 @@ function Combustible({data, flota, tractoIdx, today, T}) {
     return acc;
   }, [monthlyStats]);
 
-  // Por sucursal acumulado
   const sucAcum = useMemo(() => {
     const acc = {};
     monthlyStats.forEach(m => {
@@ -1519,7 +1584,6 @@ function Combustible({data, flota, tractoIdx, today, T}) {
       </div>
     </div>
 
-    {/* Panel editable: Precio Diésel + Rendimientos */}
     <div style={{...card,borderLeft:`4px solid ${T.red}`,background:T.isDark?"#1a1518":T.sf}}>
       <div style={{fontSize:"14px",fontWeight:700,marginBottom:"12px",color:T.tx}}>⛽ Parámetros de Costo Combustible</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:"16px",alignItems:"end"}}>
@@ -1556,7 +1620,6 @@ function Combustible({data, flota, tractoIdx, today, T}) {
       </div>
     </div>
 
-    {/* KPIs */}
     <div style={{display:"flex",gap:"16px",flexWrap:"wrap",marginBottom:"16px"}}>
       <StatCard T={T} icon="🛣️" value={Math.round(totalKm / 1000).toLocaleString("es-CL") + "K"} label="KM Totales" color={T.grn}/>
       <StatCard T={T} icon="📋" value={totalTramos.toLocaleString("es-CL")} label="Tramos"/>
@@ -1564,7 +1627,6 @@ function Combustible({data, flota, tractoIdx, today, T}) {
       <StatCard T={T} icon="📊" value={avgKmMes.toLocaleString("es-CL")} label="KM Prom./Mes" color={T.blu}/>
     </div>
 
-    {/* Consumo por marca */}
     <div style={card}>
       <div style={{fontSize:"14px",fontWeight:600,marginBottom:"14px",color:T.tx}}>🚛 Consumo Estimado por Marca de Tracto</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"12px"}}>
@@ -1611,12 +1673,10 @@ function Combustible({data, flota, tractoIdx, today, T}) {
       </div>
     </div>
 
-    {/* Evolución mensual — solo se muestra si hay más de 1 mes */}
     {displayStats.length > 1 && <div style={card}>
       <div style={{fontSize:"14px",fontWeight:600,marginBottom:"14px",color:T.tx}}>📈 Evolución Mensual</div>
       <div style={{overflowX:"auto"}}>
         {displayStats.map((m, i) => {
-          const pct = maxKm > 0 ? (m.km / maxKm * 100) : 0;
           const prev = i > 0 ? displayStats[i - 1] : null;
           const deltaKm = prev ? ((m.km - prev.km) / Math.max(prev.km, 1) * 100) : null;
           const litros = calcLitrosMarca(m.byMarca || {SCANIA:{km:0},VOLVO:{km:0}});
@@ -1633,11 +1693,9 @@ function Combustible({data, flota, tractoIdx, today, T}) {
                 </div>
               </div>
               <div style={{height:"14px",background:T.sf2,borderRadius:"7px",border:`1px solid ${T.bd}`,overflow:"hidden",display:"flex"}}>
-                {/* Scania portion */}
                 {m.byMarca.SCANIA && m.byMarca.SCANIA.km > 0 && (
                   <div style={{height:"100%",width:(m.byMarca.SCANIA.km / maxKm * 100)+"%",background:"#3b82f6",transition:"width 0.3s"}} title={"Scania: "+m.byMarca.SCANIA.km.toLocaleString("es-CL")+" km"}/>
                 )}
-                {/* Volvo portion */}
                 {m.byMarca.VOLVO && m.byMarca.VOLVO.km > 0 && (
                   <div style={{height:"100%",width:(m.byMarca.VOLVO.km / maxKm * 100)+"%",background:"#8b5cf6",transition:"width 0.3s"}} title={"Volvo: "+m.byMarca.VOLVO.km.toLocaleString("es-CL")+" km"}/>
                 )}
@@ -1653,18 +1711,13 @@ function Combustible({data, flota, tractoIdx, today, T}) {
     </div>}
 
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px",marginBottom:"16px"}}>
-      {/* Tabla mensual con costo */}
       <div style={card}>
         <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>📊 Detalle por Mes</div>
         <div style={{maxHeight:"400px",overflowY:"auto",overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
             <thead><tr>
-              <th style={thStyle}>Mes</th>
-              <th style={thStyle}>KM</th>
-              <th style={thStyle}>Δ</th>
-              <th style={thStyle}>Tramos</th>
-              <th style={thStyle}>Litros</th>
-              <th style={thStyle}>Costo Est.</th>
+              <th style={thStyle}>Mes</th><th style={thStyle}>KM</th><th style={thStyle}>Δ</th>
+              <th style={thStyle}>Tramos</th><th style={thStyle}>Litros</th><th style={thStyle}>Costo Est.</th>
             </tr></thead>
             <tbody>{withDelta.map((m, i) => (
               <tr key={m.mes} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
@@ -1680,7 +1733,6 @@ function Combustible({data, flota, tractoIdx, today, T}) {
         </div>
       </div>
 
-      {/* KM por sucursal */}
       <div style={card}>
         <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>🗺️ KM Acumulado por Sucursal</div>
         <div style={{maxHeight:"400px",overflowY:"auto"}}>
@@ -1709,7 +1761,6 @@ function Combustible({data, flota, tractoIdx, today, T}) {
       </div>
     </div>
 
-    {/* Tabla mensual cruzada por sucursal */}
     <div style={card}>
       <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>📋 KM Mensual por Sucursal (miles)</div>
       <div style={{overflowX:"auto"}}>
