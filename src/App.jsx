@@ -8,7 +8,6 @@ const CSV_ULTIMOS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoXDMe1856
 const SIN_SOLICITUD = "-Viaje sin solicitud -";
 
 // Detección centralizada de viajes vacíos/remonta/retorno
-// Criterios: (1) cliente = SIN_SOLICITUD, (2) cliente vacío/nulo, (3) carga contiene "VACIO"
 function isVacioTrip(row) {
   if (!row) return false;
   if (row.Cliente === SIN_SOLICITUD) return true;
@@ -70,7 +69,9 @@ function getCategoria(tipo){
 function cleanPatente(p){if(!p)return "";const s=String(p).trim().toUpperCase();const i=s.lastIndexOf("-");return i>0?s.substring(0,i):s;}
 function parseDate(str){if(!str)return null;if(str instanceof Date)return str;const[d,m,y]=String(str).split("/");if(!d||!m||!y)return null;return new Date(+y,+m-1,+d);}
 function formatDate(d){if(!d)return "-";return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();}
+function formatDateTime(d){if(!d)return "-";return formatDate(d)+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0");}
 function daysBetween(d1,d2){return Math.floor((d2-d1)/86400000);}
+function dayKey(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
 
 function getEstadoEquipo(daysInactive) {
   if (daysInactive === null || daysInactive === undefined) return "SIN VIAJES";
@@ -180,6 +181,28 @@ function ThemeToggle({dark, onToggle}) {
   );
 }
 
+// ── Botón Refrescar ──
+function RefreshButton({onRefresh, loading, lastLoad, T}) {
+  const segundos = lastLoad ? Math.floor((Date.now() - lastLoad) / 1000) : 0;
+  const minutos = Math.floor(segundos / 60);
+  const ago = segundos < 60 ? "hace " + segundos + "s" : minutos < 60 ? "hace " + minutos + "m" : "hace " + Math.floor(minutos / 60) + "h " + (minutos % 60) + "m";
+  const isOld = minutos >= 5;
+  return (
+    <button onClick={onRefresh} disabled={loading} title={lastLoad ? "Última carga: " + formatDateTime(new Date(lastLoad)) : "Recargar datos"} style={{
+      display:"flex",alignItems:"center",gap:"6px",padding:"7px 13px",borderRadius:"20px",
+      border:`1px solid ${isOld?T.ac+"88":T.bd}`,cursor:loading?"wait":"pointer",
+      fontSize:"11px",fontWeight:600,
+      background:isOld?T.acD:(T.isDark?"#1a1e28":"#f8fafc"),
+      color:isOld?T.ac:T.tx,fontFamily:"inherit",
+      transition:"all 0.2s",whiteSpace:"nowrap",
+      opacity:loading?.5:1,
+    }}>
+      <span style={{fontSize:"13px",animation:loading?"spin 1s linear infinite":"none",display:"inline-block"}}>🔄</span>
+      <span>{lastLoad ? ago : "Cargar"}</span>
+    </button>
+  );
+}
+
 // ── Helper: obtener clave YYYY-MM de una Date ──
 function getMonthKey(d) {
   if (!d) return null;
@@ -192,7 +215,7 @@ function monthKeyToLabel(mk) {
   return MESES[parseInt(m) - 1] + " " + y;
 }
 
-// ═══ VIEW 1: BUSCADOR ═══
+// ═══ VIEW 1: BUSCADOR (min 2 chars) ═══
 function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
   const[q,setQ]=useState("");const[tipo,setTipo]=useState("all");
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
@@ -203,7 +226,7 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
   const th={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf,whiteSpace:"nowrap"};
 
   const results=useMemo(()=>{
-    const s=q.toUpperCase().trim();if(!s||s.length<3)return null;const out=[];
+    const s=q.toUpperCase().trim();if(!s||s.length<2)return null;const out=[];
     if(tipo==="all"||tipo==="tracto")for(const[k,v]of tractoIdx.entries()){if(k.includes(s))out.push({t:"TRACTO",pat:k,tramos:v});}
     if(tipo==="all"||tipo==="rampla")for(const[k,v]of ramplaIdx.entries()){if(k.includes(s))out.push({t:"RAMPLA",pat:k,tramos:v});}
     return out.slice(0,20);
@@ -218,9 +241,9 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
           <option value="tracto">Tractos</option>
           <option value="rampla">Ramplas</option>
         </select>
-        <input style={{...input,flex:1,minWidth:"200px"}} placeholder="Buscar patente (mín. 3 caracteres)..." value={q} onChange={e=>setQ(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="characters"/>
+        <input style={{...input,flex:1,minWidth:"200px"}} placeholder="Buscar patente (mín. 2 caracteres)..." value={q} onChange={e=>setQ(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="characters"/>
       </div>
-      {!results&&<div style={{marginTop:"12px",padding:"14px",background:T.sf2,borderRadius:"8px",border:`1px dashed ${T.bd}`,textAlign:"center",color:T.txM,fontSize:"13px"}}>Ingresa al menos 3 caracteres de la patente para buscar</div>}
+      {!results&&<div style={{marginTop:"12px",padding:"14px",background:T.sf2,borderRadius:"8px",border:`1px dashed ${T.bd}`,textAlign:"center",color:T.txM,fontSize:"13px"}}>Ingresa al menos 2 caracteres de la patente para buscar</div>}
     </div>
     {results&&results.length===0&&<div style={{...card,textAlign:"center",color:T.txM}}>Sin resultados para "{q}"</div>}
     {results&&results.map((r,i)=>{
@@ -283,7 +306,7 @@ function Buscador({tractoIdx,ramplaIdx,flota,today,T}){
   </div>);
 }
 
-// ═══ VIEW 2: ESTADO DE FLOTA ═══
+// ═══ VIEW 2: ESTADO DE FLOTA (utilización diaria real + ratio cargado/vacío) ═══
 function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const[days,setDays]=useState(30);
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
@@ -293,86 +316,183 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx};
 
   const stats=useMemo(()=>{
-    const cutoff=new Date(today);cutoff.setDate(cutoff.getDate()-days);
-    let fT=0,fE=0,fO=0;
+    const cutoff=new Date(today);cutoff.setDate(cutoff.getDate()-days+1);
+    cutoff.setHours(0,0,0,0);
+
+    // Clasificar flota
     const flotaTractos=new Set();
     const flotaEquipos=new Set();
+    let fT=0,fE=0,fO=0;
     for(const[pat,v]of flota.entries()){
       const c=getCategoria(v.tipoequipo);
       if(c==="TRACTOCAMION"){fT++;flotaTractos.add(pat);}
       else if(c==="EQUIPO"){fE++;flotaEquipos.add(pat);}
       else fO++;
     }
-    let aT=0,aE=0;
+
+    // Lista de días del período
+    const dayKeys=[];
+    for(let i=0;i<days;i++){
+      const d=new Date(cutoff);d.setDate(d.getDate()+i);
+      dayKeys.push(dayKey(d));
+    }
+
+    // Día → Set de patentes (comercial vs total)
+    const tractosComercialPorDia=new Map();
+    const tractosTotalPorDia=new Map();
+    const equiposComercialPorDia=new Map();
+    const equiposTotalPorDia=new Map();
+    dayKeys.forEach(k=>{
+      tractosComercialPorDia.set(k,new Set());
+      tractosTotalPorDia.set(k,new Set());
+      equiposComercialPorDia.set(k,new Set());
+      equiposTotalPorDia.set(k,new Set());
+    });
+
+    // Agregadores
     let totalKm=0,totalTrips=0;
-    const sucCount={};
-    for(const pat of flotaTractos){
-      const tr=tractoIdx.get(pat);
-      if(tr?.length>0){
-        let hasRecent=false;
-        for(const t of tr){
-          if(t._date<cutoff) break;
-          hasRecent=true;
-          if(t.Cliente!==SIN_SOLICITUD){
-            totalKm+=(Number(t.Kilometro)||0);
-            totalTrips++;
-          }
+    const viajesPorTractoPorDia=new Map(); // patente → Map<dayKey, count>
+    const tractoKmComercial=new Map(); // para top KM
+    const tractoKmVacio=new Map(); // para ratio cargado/vacío
+    const tractoKmPorMarca={SCANIA:0,VOLVO:0};
+
+    for(const row of data){
+      if(!row._date||row._date<cutoff)continue;
+      const dk=dayKey(row._date);
+      const esVacio=isVacioTrip(row);
+      const pat=row.Tracto;
+      const ramp=row.Rampla;
+      const km=Number(row.Kilometro)||0;
+
+      if(!esVacio){
+        totalKm+=km;
+        totalTrips++;
+      }
+
+      if(pat&&flotaTractos.has(pat)){
+        tractosTotalPorDia.get(dk)?.add(pat);
+        if(!esVacio){
+          tractosComercialPorDia.get(dk)?.add(pat);
+          if(!viajesPorTractoPorDia.has(pat)) viajesPorTractoPorDia.set(pat,new Map());
+          const m=viajesPorTractoPorDia.get(pat);
+          m.set(dk,(m.get(dk)||0)+1);
         }
-        if(hasRecent) aT++;
-      } else {
-        if(ultimosMap.get(pat)?._date>=cutoff) aT++;
+      }
+
+      if(ramp&&flotaEquipos.has(ramp)){
+        equiposTotalPorDia.get(dk)?.add(ramp);
+        if(!esVacio) equiposComercialPorDia.get(dk)?.add(ramp);
+      }
+
+      // KM por tracto (comercial y vacío) — todos los tractos
+      if(pat){
+        if(esVacio){
+          tractoKmVacio.set(pat,(tractoKmVacio.get(pat)||0)+km);
+        }else{
+          tractoKmComercial.set(pat,(tractoKmComercial.get(pat)||0)+km);
+        }
       }
     }
+
+    // Utilización diaria promedio
+    let sumCompTractos=0,sumTotalTractos=0,sumCompEquipos=0,sumTotalEquipos=0;
+    const serieTractos=[];
+    for(const dk of dayKeys){
+      const ct=tractosComercialPorDia.get(dk).size;
+      const tt=tractosTotalPorDia.get(dk).size;
+      const ce=equiposComercialPorDia.get(dk).size;
+      const te=equiposTotalPorDia.get(dk).size;
+      sumCompTractos+=ct;sumTotalTractos+=tt;
+      sumCompEquipos+=ce;sumTotalEquipos+=te;
+      serieTractos.push({day:dk,comercial:ct,total:tt});
+    }
+    const utilCompTractos=fT?(sumCompTractos/(days*fT)*100):0;
+    const utilTotalTractos=fT?(sumTotalTractos/(days*fT)*100):0;
+    const utilCompEquipos=fE?(sumCompEquipos/(days*fE)*100):0;
+    const utilTotalEquipos=fE?(sumTotalEquipos/(days*fE)*100):0;
+
+    const promTractosActivosComercial=sumCompTractos/days;
+    const promTractosActivosTotal=sumTotalTractos/days;
+    const promEquiposActivosComercial=sumCompEquipos/days;
+
+    // Distribución de carga por tracto-día
+    const distribucion={"0":0,"1":0,"2":0,"3+":0};
+    for(const pat of flotaTractos){
+      const mDias=viajesPorTractoPorDia.get(pat);
+      for(const dk of dayKeys){
+        const v=mDias?.get(dk)||0;
+        if(v===0)distribucion["0"]++;
+        else if(v===1)distribucion["1"]++;
+        else if(v===2)distribucion["2"]++;
+        else distribucion["3+"]++;
+      }
+    }
+
+    // Top ociosos con ratio cargado/vacío
+    const diasOciososTracto=[];
+    for(const pat of flotaTractos){
+      const mDias=viajesPorTractoPorDia.get(pat);
+      let trabajados=0;
+      if(mDias){
+        for(const dk of dayKeys){
+          if((mDias.get(dk)||0)>0)trabajados++;
+        }
+      }
+      const ociosos=days-trabajados;
+      const pctUso=(trabajados/days)*100;
+      const fi=flota.get(pat);
+      const kmCom=tractoKmComercial.get(pat)||0;
+      const kmVac=tractoKmVacio.get(pat)||0;
+      const kmTot=kmCom+kmVac;
+      const pctVacio=kmTot>0?(kmVac/kmTot*100):null;
+      diasOciososTracto.push({
+        pat,ociosos,trabajados,pctUso,
+        marca:fi?.marca||"-",modelo:fi?.modelo||"-",tipo:fi?.tipoequipo||"-",
+        kmCom,kmVac,kmTot,pctVacio,
+      });
+    }
+    diasOciososTracto.sort((a,b)=>b.ociosos-a.ociosos);
+
+    // Equipos por sucursal (catálogo)
+    const sucCount={};
     for(const pat of flotaEquipos){
       const tr=ramplaIdx.get(pat);
-      if(tr?.length>0){
-        let hasRecent=false;
-        for(const t of tr){
-          if(t._date<cutoff) break;
-          hasRecent=true;
-        }
-        if(hasRecent) aE++;
-        const sc=getSucursal(tr[0].Destino);
-        sucCount[sc]=(sucCount[sc]||0)+1;
-      } else {
+      let loc=null;
+      if(tr?.length>0)loc=tr[0].Destino;
+      else{
         const u=ultimosMap.get(pat);
-        if(u?._date>=cutoff) aE++;
-        if(u){
-          const sc=getSucursal(u.Destino||"");
-          sucCount[sc]=(sucCount[sc]||0)+1;
-        }
+        if(u)loc=u.Destino;
       }
+      const sc=loc?getSucursal(loc):"OTROS";
+      sucCount[sc]=(sucCount[sc]||0)+1;
     }
-    for(const[pat,tr]of tractoIdx.entries()){
-      if(flotaTractos.has(pat)) continue;
-      for(const t of tr){
-        if(t._date<cutoff) break;
-        if(t.Cliente!==SIN_SOLICITUD){
-          totalKm+=(Number(t.Kilometro)||0);
-          totalTrips++;
-        }
-      }
-    }
-    const tKm=[];
-    for(const[k,tr]of tractoIdx.entries()){
-      let km=0;
-      for(const t of tr){
-        if(t._date<cutoff) break;
-        if(t.Cliente!==SIN_SOLICITUD) km+=(Number(t.Kilometro)||0);
-      }
-      if(km>0)tKm.push([k,km]);
-    }
-    tKm.sort((a,b)=>b[1]-a[1]);
+
+    // Top 10 KM
+    const topT=[...tractoKmComercial.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10);
+
+    // Ratio global cargado/vacío
+    let kmTotalCom=0,kmTotalVac=0;
+    for(const v of tractoKmComercial.values())kmTotalCom+=v;
+    for(const v of tractoKmVacio.values())kmTotalVac+=v;
+    const ratioGlobalVacio=(kmTotalCom+kmTotalVac)>0?(kmTotalVac/(kmTotalCom+kmTotalVac)*100):0;
+
     return{
-      fT,fE,fO,aT,aE,totalKm,totalTrips,sucCount,
-      uT:fT?Math.min(100,(aT/fT*100)).toFixed(1):0,
-      uE:fE?Math.min(100,(aE/fE*100)).toFixed(1):0,
-      uTraw:fT?(aT/fT*100).toFixed(1):0,
-      uEraw:fE?(aE/fE*100).toFixed(1):0,
-      topT:tKm.slice(0,10),
+      fT,fE,fO,
+      utilCompTractos,utilTotalTractos,utilCompEquipos,utilTotalEquipos,
+      promTractosActivosComercial,promTractosActivosTotal,promEquiposActivosComercial,
+      totalKm,totalTrips,
+      sucCount,
+      topT,
+      serieTractos,
+      distribucion,
+      diasOciososTracto,
       totalR:flotaEquipos.size,
+      dayKeys,
+      ratioGlobalVacio,kmTotalCom,kmTotalVac,
     };
   },[data,tractoIdx,ramplaIdx,flota,ultimosMap,today,days]);
+
+  const barColor=(pct)=>pct>=70?T.grn:pct>=40?T.ac:T.red;
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}}>
@@ -382,51 +502,148 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
         <option value={30}>30 días</option><option value={60}>60 días</option><option value={90}>90 días</option>
       </select>
     </div>
+
+    {/* ── UTILIZACIÓN DIARIA PROMEDIO ── */}
     <div style={card}>
-      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"4px",color:T.tx}}>📈 Utilización de Flota (últimos {days} días)</div>
-      <div style={{fontSize:"11px",color:T.txM,marginBottom:"16px"}}>
-        Base: equipos registrados en catálogo de flota · KM y tramos excluyen viajes de remonta/vacío
+      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"4px",color:T.tx}}>
+        📈 Utilización Diaria Promedio — últimos {days} día{days>1?"s":""}
       </div>
+      <div style={{fontSize:"11px",color:T.txM,marginBottom:"16px",lineHeight:1.5}}>
+        Fórmula: <strong style={{color:T.tx}}>Σ(equipos activos por día) / ({days} días × flota total)</strong> · Cada día cuenta por separado (L-D) ·
+        {" "}<span style={{color:T.grn}}>Comercial</span> = con tramo facturable ·
+        {" "}<span style={{color:T.blu}}>Total</span> = incluye remonta/vacío
+      </div>
+
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"24px"}}>
         <div>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px"}}>
-            <span style={{color:T.tx}}>🚛 Tractocamiones</span>
-            <span style={{fontWeight:700,color:T.ac}}>
-              {stats.aT+" / "+stats.fT}
-              <span style={{color:stats.uTraw>100?T.red:T.grn,marginLeft:4}}>({stats.uTraw}%)</span>
-            </span>
+          <div style={{fontSize:"13px",fontWeight:700,color:T.tx,marginBottom:"10px"}}>🚛 Tractocamiones <span style={{color:T.txM,fontWeight:400,fontSize:"11px"}}>({stats.fT} en flota)</span></div>
+
+          <div style={{marginBottom:"10px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:"3px",alignItems:"baseline"}}>
+              <span style={{fontSize:"11px",color:T.grn,fontWeight:600}}>COMERCIAL</span>
+              <span style={{fontWeight:700,color:barColor(stats.utilCompTractos),fontSize:"14px"}}>
+                {stats.utilCompTractos.toFixed(1)}%
+                <span style={{color:T.txM,fontWeight:400,fontSize:"11px",marginLeft:"6px"}}>
+                  ~{stats.promTractosActivosComercial.toFixed(1)} activos/día
+                </span>
+              </span>
+            </div>
+            <div style={{height:"14px",background:T.sf2,borderRadius:"7px",overflow:"hidden",border:`1px solid ${T.bd}`}}>
+              <div style={{height:"100%",width:Math.min(100,stats.utilCompTractos)+"%",background:`linear-gradient(90deg,${T.grn},${barColor(stats.utilCompTractos)})`,borderRadius:"7px",transition:"width 0.4s"}}/>
+            </div>
           </div>
-          <div style={{height:"12px",background:T.sf2,borderRadius:"6px",overflow:"hidden",border:`1px solid ${T.bd}`}}>
-            <div style={{height:"100%",width:stats.uT+"%",background:`linear-gradient(90deg,${T.grn},${T.ac})`,borderRadius:"6px"}}/>
+
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:"3px",alignItems:"baseline"}}>
+              <span style={{fontSize:"11px",color:T.blu,fontWeight:600}}>TOTAL (c/ remonta)</span>
+              <span style={{fontWeight:700,color:barColor(stats.utilTotalTractos),fontSize:"14px"}}>
+                {stats.utilTotalTractos.toFixed(1)}%
+                <span style={{color:T.txM,fontWeight:400,fontSize:"11px",marginLeft:"6px"}}>
+                  ~{stats.promTractosActivosTotal.toFixed(1)} activos/día
+                </span>
+              </span>
+            </div>
+            <div style={{height:"10px",background:T.sf2,borderRadius:"5px",overflow:"hidden",border:`1px solid ${T.bd}`}}>
+              <div style={{height:"100%",width:Math.min(100,stats.utilTotalTractos)+"%",background:`linear-gradient(90deg,${T.blu},${T.ac})`,borderRadius:"5px",transition:"width 0.4s"}}/>
+            </div>
           </div>
-          {stats.uTraw>100&&<div style={{fontSize:"10px",color:T.txM,marginTop:3}}>⚠ Numerador incluye patentes fuera del catálogo de flota</div>}
+
+          {stats.utilTotalTractos>stats.utilCompTractos&&(
+            <div style={{marginTop:"8px",fontSize:"10px",color:T.txM,padding:"6px 10px",background:T.sf2,borderRadius:"6px",borderLeft:`3px solid ${T.ac}`}}>
+              ⚠ Brecha remonta: <strong style={{color:T.ac}}>{(stats.utilTotalTractos-stats.utilCompTractos).toFixed(1)}pp</strong> de capacidad en reposicionamiento
+            </div>
+          )}
         </div>
+
         <div>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px"}}>
-            <span style={{color:T.tx}}>🚃 Equipos</span>
-            <span style={{fontWeight:700,color:T.ac}}>
-              {stats.aE+" / "+stats.fE}
-              <span style={{color:stats.uEraw>100?T.red:T.grn,marginLeft:4}}>({stats.uEraw}%)</span>
-            </span>
+          <div style={{fontSize:"13px",fontWeight:700,color:T.tx,marginBottom:"10px"}}>🚃 Ramplas / Equipos <span style={{color:T.txM,fontWeight:400,fontSize:"11px"}}>({stats.fE} en flota)</span></div>
+
+          <div style={{marginBottom:"10px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:"3px",alignItems:"baseline"}}>
+              <span style={{fontSize:"11px",color:T.grn,fontWeight:600}}>COMERCIAL</span>
+              <span style={{fontWeight:700,color:barColor(stats.utilCompEquipos),fontSize:"14px"}}>
+                {stats.utilCompEquipos.toFixed(1)}%
+                <span style={{color:T.txM,fontWeight:400,fontSize:"11px",marginLeft:"6px"}}>
+                  ~{stats.promEquiposActivosComercial.toFixed(1)} activos/día
+                </span>
+              </span>
+            </div>
+            <div style={{height:"14px",background:T.sf2,borderRadius:"7px",overflow:"hidden",border:`1px solid ${T.bd}`}}>
+              <div style={{height:"100%",width:Math.min(100,stats.utilCompEquipos)+"%",background:`linear-gradient(90deg,${T.grn},${barColor(stats.utilCompEquipos)})`,borderRadius:"7px",transition:"width 0.4s"}}/>
+            </div>
           </div>
-          <div style={{height:"12px",background:T.sf2,borderRadius:"6px",overflow:"hidden",border:`1px solid ${T.bd}`}}>
-            <div style={{height:"100%",width:stats.uE+"%",background:`linear-gradient(90deg,${T.blu},${T.ac})`,borderRadius:"6px"}}/>
+
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:"3px",alignItems:"baseline"}}>
+              <span style={{fontSize:"11px",color:T.blu,fontWeight:600}}>TOTAL (c/ remonta)</span>
+              <span style={{fontWeight:700,color:barColor(stats.utilTotalEquipos),fontSize:"14px"}}>
+                {stats.utilTotalEquipos.toFixed(1)}%
+              </span>
+            </div>
+            <div style={{height:"10px",background:T.sf2,borderRadius:"5px",overflow:"hidden",border:`1px solid ${T.bd}`}}>
+              <div style={{height:"100%",width:Math.min(100,stats.utilTotalEquipos)+"%",background:`linear-gradient(90deg,${T.blu},${T.ac})`,borderRadius:"5px",transition:"width 0.4s"}}/>
+            </div>
           </div>
-          {stats.uEraw>100&&<div style={{fontSize:"10px",color:T.txM,marginTop:3}}>⚠ Numerador incluye patentes fuera del catálogo de flota</div>}
         </div>
       </div>
     </div>
+
+    {/* ── STATCARDS ── */}
     <div style={{display:"flex",gap:"16px",flexWrap:"wrap",marginBottom:"16px"}}>
-      <StatCard T={T} icon="🛣️" value={Math.round(stats.totalKm/1000).toLocaleString("es-CL")+"K"} label="KM Totales" color={T.grn}/>
-      <StatCard T={T} icon="📋" value={stats.totalTrips.toLocaleString("es-CL")} label="Tramos"/>
+      <StatCard T={T} icon="🛣️" value={Math.round(stats.totalKm/1000).toLocaleString("es-CL")+"K"} label="KM Comerciales" color={T.grn}/>
+      <StatCard T={T} icon="📋" value={stats.totalTrips.toLocaleString("es-CL")} label="Tramos Comerciales"/>
+      <StatCard T={T} icon="🔄" value={stats.ratioGlobalVacio.toFixed(1)+"%"} label="KM Vacío / Total" color={stats.ratioGlobalVacio>25?T.red:stats.ratioGlobalVacio>15?T.ac:T.grn}/>
       <StatCard T={T} icon="🏢" value={stats.fT+stats.fE+stats.fO} label="Flota Total"/>
       <StatCard T={T} icon="🔧" value={stats.fO} label="Otros (camiones, grúas)"/>
     </div>
+
+    {/* ── TENDENCIA DIARIA ── */}
+    {days>1&&(
+      <div style={card}>
+        <div style={{fontSize:"14px",fontWeight:600,marginBottom:"4px",color:T.tx}}>
+          📉 Tendencia Diaria — Tractocamiones Activos
+        </div>
+        <div style={{fontSize:"11px",color:T.txM,marginBottom:"14px"}}>
+          Cada barra es un día · Verde = comerciales · Azul = remonta · Línea punteada = flota total ({stats.fT})
+        </div>
+        <TendenciaDiaria serie={stats.serieTractos} flotaTotal={stats.fT} T={T}/>
+      </div>
+    )}
+
+    {/* ── DISTRIBUCIÓN DE CARGA + EQUIPOS POR SUCURSAL ── */}
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
+      <div style={card}>
+        <div style={{fontSize:"14px",fontWeight:600,marginBottom:"4px",color:T.tx}}>
+          📊 Distribución de Carga por Tracto/Día
+        </div>
+        <div style={{fontSize:"11px",color:T.txM,marginBottom:"14px"}}>
+          De los {(stats.fT*days).toLocaleString("es-CL")} casos (tracto × día), cuántos viajes comerciales se hicieron
+        </div>
+        {Object.entries(stats.distribucion).map(([k,v])=>{
+          const total=stats.fT*days;
+          const pct=total?(v/total*100):0;
+          const color=k==="0"?T.red:k==="1"?T.ac:k==="2"?T.blu:T.grn;
+          const etiqueta=k==="0"?"Ociosos (0 viajes)":k==="1"?"1 viaje":k==="2"?"2 viajes":"3 o más viajes";
+          return(
+            <div key={k} style={{marginBottom:"8px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:"3px",fontSize:"12px"}}>
+                <span style={{color:T.tx,fontWeight:600}}>{etiqueta}</span>
+                <span style={{color:T.txM}}>
+                  <strong style={{color}}>{v.toLocaleString("es-CL")}</strong> ({pct.toFixed(1)}%)
+                </span>
+              </div>
+              <div style={{height:"10px",background:T.sf2,borderRadius:"5px",overflow:"hidden",border:`1px solid ${T.bd}`}}>
+                <div style={{height:"100%",width:pct+"%",background:color,borderRadius:"5px",transition:"width 0.3s"}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       <div style={card}>
         <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>🗺️ Equipos por Sucursal (última ubicación)</div>
         {Object.entries(stats.sucCount).sort((a,b)=>b[1]-a[1]).map(([sc,c])=>{
-          const pct=(c/stats.totalR*100).toFixed(1);
+          const pct=stats.totalR?(c/stats.totalR*100).toFixed(1):0;
           return(<div key={sc} style={{marginBottom:"8px"}}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:"3px"}}>
               <SucBadge s={sc} T={T}/>
@@ -438,21 +655,109 @@ function EstadoFlota({data,tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
           </div>);
         })}
       </div>
+    </div>
+
+    {/* ── TRACTOS MÁS OCIOSOS (con ratio vacío) + TOP KM ── */}
+    <div style={{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:"16px",marginTop:"16px"}}>
       <div style={card}>
-        <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>🏆 Top 10 Tractos por KM</div>
+        <div style={{fontSize:"14px",fontWeight:600,marginBottom:"4px",color:T.tx}}>
+          😴 Top 15 Tractos Más Ociosos
+        </div>
+        <div style={{fontSize:"11px",color:T.txM,marginBottom:"12px"}}>
+          Días sin viaje comercial · % uso y % KM vacío en últimos {days} días
+        </div>
+        <div style={{maxHeight:"480px",overflowY:"auto"}}>
+          <table style={tbl}>
+            <thead><tr>
+              <th style={th}>Tracto</th>
+              <th style={{...th,textAlign:"right"}}>Ocios.</th>
+              <th style={{...th,textAlign:"right"}}>% Uso</th>
+              <th style={{...th,textAlign:"right"}}>% Vacío</th>
+              <th style={th}>Marca</th>
+            </tr></thead>
+            <tbody>{stats.diasOciososTracto.slice(0,15).map((r,i)=>{
+              const cUso=r.pctUso<20?T.red:r.pctUso<50?T.ac:T.grn;
+              const cVac=r.pctVacio===null?T.txM:r.pctVacio>30?T.red:r.pctVacio>15?T.ac:T.grn;
+              return(
+                <tr key={r.pat} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
+                  <td style={{...td,fontWeight:700}}>{r.pat}</td>
+                  <td style={{...td,textAlign:"right",color:cUso,fontWeight:700}}>{r.ociosos}/{days}</td>
+                  <td style={{...td,textAlign:"right",color:cUso,fontWeight:600}}>{r.pctUso.toFixed(0)}%</td>
+                  <td style={{...td,textAlign:"right",color:cVac,fontWeight:600}}>{r.pctVacio!==null?r.pctVacio.toFixed(0)+"%":"—"}</td>
+                  <td style={{...td,fontSize:"11px",color:T.txM}}>{r.marca}</td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={{fontSize:"14px",fontWeight:600,marginBottom:"4px",color:T.tx}}>🏆 Top 10 Tractos por KM</div>
+        <div style={{fontSize:"11px",color:T.txM,marginBottom:"12px"}}>
+          KM comerciales en los últimos {days} días
+        </div>
         <table style={tbl}>
-          <thead><tr><th style={th}>#</th><th style={th}>Tracto</th><th style={th}>KM</th></tr></thead>
+          <thead><tr><th style={th}>#</th><th style={th}>Tracto</th><th style={{...th,textAlign:"right"}}>KM</th></tr></thead>
           <tbody>{stats.topT.map(([t,km],i)=>(
             <tr key={t} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
-              <td style={{padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx}}>{i+1}</td>
-              <td style={{padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontWeight:600}}>{t}</td>
-              <td style={{padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx}}>{km.toLocaleString("es-CL")}</td>
+              <td style={td}>{i+1}</td>
+              <td style={{...td,fontWeight:700}}>{t}</td>
+              <td style={{...td,textAlign:"right",fontWeight:600}}>{km.toLocaleString("es-CL")}</td>
             </tr>
           ))}</tbody>
         </table>
       </div>
     </div>
   </div>);
+}
+
+// Sub-componente: gráfico de tendencia diaria
+function TendenciaDiaria({serie,flotaTotal,T}){
+  const maxVal=Math.max(flotaTotal,...serie.map(d=>d.total),1);
+  const H=140;
+  const barW=Math.max(6,Math.min(24,Math.floor(700/serie.length)-2));
+  const gap=2;
+  const totalW=serie.length*(barW+gap);
+
+  return(
+    <div style={{overflowX:"auto",paddingBottom:"8px"}}>
+      <div style={{position:"relative",minWidth:totalW+"px",height:(H+40)+"px"}}>
+        <div style={{
+          position:"absolute",left:0,right:0,
+          top:(H-(flotaTotal/maxVal)*H)+"px",
+          height:"1px",background:T.txM,
+          borderTop:`1px dashed ${T.txM}`,
+        }}/>
+        <div style={{
+          position:"absolute",
+          top:(H-(flotaTotal/maxVal)*H-14)+"px",right:"4px",
+          fontSize:"9px",color:T.txM,background:T.sf,padding:"1px 5px",borderRadius:"3px",
+        }}>flota: {flotaTotal}</div>
+        <div style={{display:"flex",alignItems:"flex-end",height:H+"px",gap:gap+"px"}}>
+          {serie.map((d)=>{
+            const hComercial=(d.comercial/maxVal)*H;
+            const hRemonta=((d.total-d.comercial)/maxVal)*H;
+            const fecha=d.day.slice(8,10)+"/"+d.day.slice(5,7);
+            return(
+              <div key={d.day} style={{width:barW+"px",display:"flex",flexDirection:"column",justifyContent:"flex-end",position:"relative"}} title={`${fecha}: ${d.comercial} comerciales, ${d.total} total`}>
+                {hRemonta>0&&<div style={{height:hRemonta+"px",background:T.blu,opacity:0.5,borderRadius:"2px 2px 0 0"}}/>}
+                <div style={{height:hComercial+"px",background:T.grn,borderRadius:hRemonta>0?"0":"2px 2px 0 0"}}/>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{display:"flex",gap:gap+"px",marginTop:"6px",fontSize:"9px",color:T.txM}}>
+          {serie.map((d,i)=>{
+            const step=serie.length>30?7:serie.length>14?3:1;
+            if(i%step!==0&&i!==serie.length-1)return <div key={d.day} style={{width:barW+"px"}}/>;
+            const fecha=d.day.slice(8,10)+"/"+d.day.slice(5,7);
+            return <div key={d.day} style={{width:barW+"px",textAlign:"center",whiteSpace:"nowrap"}}>{fecha}</div>;
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ═══ PDF PRINT HELPER ═══
@@ -526,7 +831,7 @@ function printReporte(rows, tipo, filtroEstado, filtroSuc, today) {
   win.onload = () => { win.focus(); win.print(); };
 }
 
-// ═══ VIEW 3: INACTIVOS ═══
+// ═══ VIEW 3: INACTIVOS (con contador de equipos ocultos) ═══
 function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const[tipo,setTipo]=useState("rampla");
   const[filtroEstado,setFiltroEstado]=useState("todos");
@@ -541,9 +846,11 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
   const badge=(c)=>({display:"inline-block",padding:"2px 8px",borderRadius:"4px",fontSize:"11px",fontWeight:600,background:`${c}22`,color:c,border:`1px solid ${c}44`});
 
-  const allEquipos = useMemo(()=>{
+  // Calcula TODOS los equipos (catálogo + fuera de catálogo) para saber cuántos quedan ocultos con el filtro soloDoc
+  const {todosEquipos, equiposOcultos} = useMemo(()=>{
     const idx = tipo==="tracto" ? tractoIdx : ramplaIdx;
-    const res = [];
+    const enCatalogoArr = [];
+    const fueraCatalogoArr = [];
     for(const[pat,fi] of flota.entries()){
       const cat = getCategoria(fi.tipoequipo);
       if(tipo==="tracto" && cat!=="TRACTOCAMION") continue;
@@ -559,40 +866,41 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       const days=lastDate?daysBetween(lastDate,today):null;
       const estado=getEstadoEquipo(days);
       const esSinSol = lastRecord?.Cliente === SIN_SOLICITUD;
-      res.push({pat,days,lastRecord,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS",fi,estado,enCatalogo:true,"lastRecord.Fecha":lastRecord?.Fecha||"","fi.tipoequipo":fi.tipoequipo||"",esSinSol});
+      enCatalogoArr.push({pat,days,lastRecord,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS",fi,estado,enCatalogo:true,"lastRecord.Fecha":lastRecord?.Fecha||"","fi.tipoequipo":fi.tipoequipo||"",esSinSol});
     }
-    if(!soloDoc){
-      for(const[pat,tr] of idx.entries()){
-        if(flota.has(pat)) continue;
-        const lastDate=tr[0]._date;
-        const days=daysBetween(lastDate,today);
-        const last=tr[0];
-        const estado=getEstadoEquipo(days);
-        const esSinSol = last.Cliente === SIN_SOLICITUD;
-        res.push({pat,days,lastRecord:last,suc:getSucursal(last.Destino),fi:null,estado,enCatalogo:false,"lastRecord.Fecha":last.Fecha||"","fi.tipoequipo":"",esSinSol});
-      }
+    for(const[pat,tr] of idx.entries()){
+      if(flota.has(pat)) continue;
+      const lastDate=tr[0]._date;
+      const days=daysBetween(lastDate,today);
+      const last=tr[0];
+      const estado=getEstadoEquipo(days);
+      const esSinSol = last.Cliente === SIN_SOLICITUD;
+      fueraCatalogoArr.push({pat,days,lastRecord:last,suc:getSucursal(last.Destino),fi:null,estado,enCatalogo:false,"lastRecord.Fecha":last.Fecha||"","fi.tipoequipo":"",esSinSol});
     }
-    return res;
+    return {
+      todosEquipos: soloDoc ? enCatalogoArr : [...enCatalogoArr, ...fueraCatalogoArr],
+      equiposOcultos: soloDoc ? fueraCatalogoArr.length : 0,
+    };
   },[tractoIdx,ramplaIdx,flota,ultimosMap,today,tipo,soloDoc]);
 
   const estadoCount=useMemo(()=>{
     const m={ACTIVO:0,INACTIVO:0,PARADO:0,"SIN VIAJES":0,total:0};
-    for(const r of allEquipos){
+    for(const r of todosEquipos){
       if(!r.enCatalogo) continue;
       m.total++;
       m[r.estado]=(m[r.estado]||0)+1;
     }
     return m;
-  },[allEquipos]);
+  },[todosEquipos]);
 
-  const sucursales=useMemo(()=>[...new Set(allEquipos.map(r=>r.suc))].sort(),[allEquipos]);
+  const sucursales=useMemo(()=>[...new Set(todosEquipos.map(r=>r.suc))].sort(),[todosEquipos]);
 
   const filtered=useMemo(()=>{
-    let f=allEquipos;
+    let f=todosEquipos;
     if(filtroEstado!=="todos") f=f.filter(r=>r.estado===filtroEstado);
     if(filtroSuc!=="todas") f=f.filter(r=>r.suc===filtroSuc);
     return f;
-  },[allEquipos,filtroEstado,filtroSuc]);
+  },[todosEquipos,filtroEstado,filtroSuc]);
 
   const {sorted,sortKey,sortDir,toggle}=useSortable(filtered,"days","desc");
   const totalP=Math.ceil(sorted.length/PP);
@@ -637,10 +945,13 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       </div>
     </div>
 
-    <div style={{background:soloDoc?`${T.grn}0a`:`${T.ac}0a`,border:`1px solid ${soloDoc?T.grn:T.ac}33`,borderRadius:"10px",padding:"8px 16px",marginBottom:"14px",fontSize:"11px",color:T.txM,display:"flex",alignItems:"center",gap:"8px"}}>
+    <div style={{background:soloDoc?`${T.grn}0a`:`${T.ac}0a`,border:`1px solid ${soloDoc?T.grn:T.ac}33`,borderRadius:"10px",padding:"8px 16px",marginBottom:"14px",fontSize:"11px",color:T.txM,display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
       <span style={{fontSize:"14px"}}>{soloDoc?"📋":"🔍"}</span>
       {soloDoc
-        ? <span>Mostrando solo equipos <strong style={{color:T.tx}}>registrados en el catálogo de flota</strong>. La sucursal indicada es la del <strong style={{color:T.tx}}>último destino registrado</strong>, incluyendo viajes de remonta/vacío.</span>
+        ? <span>Mostrando solo equipos <strong style={{color:T.tx}}>registrados en el catálogo de flota</strong>. {equiposOcultos>0 && <>
+            <span style={{color:T.ac,fontWeight:600}}>⚠ {equiposOcultos} equipos con viajes pero fuera de catálogo están ocultos</span>
+            {" "}<button onClick={()=>setSoloDoc(false)} style={{background:"none",border:"none",color:T.ac,textDecoration:"underline",cursor:"pointer",fontSize:"11px",fontWeight:600,padding:0,fontFamily:"inherit"}}>(mostrar todos)</button>
+          </>}</span>
         : <span>Mostrando <strong style={{color:T.tx}}>todos</strong> incluyendo equipos con viajes pero <strong style={{color:T.ac}}>sin registro en catálogo</strong> (subcontratos, dados de baja, etc).</span>
       }
     </div>
@@ -747,7 +1058,200 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
   </div>);
 }
 
-// ═══ VIEW 4: POR CLIENTE (HÍBRIDO — tarjeta vacíos + ranking limpio) ═══
+// ═══ VIEW NUEVA: EFICIENCIA POR TRACTO (ratio cargado/vacío detallado) ═══
+function EficienciaTracto({data,flota,today,T}){
+  const[months,setMonths]=useState(1);
+  const[filtroMarca,setFiltroMarca]=useState("todas");
+  const[filtroSuc,setFiltroSuc]=useState("todas");
+  const[minKm,setMinKm]=useState(500);
+  const[pg,setPg]=useState(1);
+  const PP=50;
+
+  const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
+  const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
+  const th={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
+  const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
+
+  const stats=useMemo(()=>{
+    const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
+    const porTracto=new Map(); // pat → {kmCom, kmVac, tramosCom, tramosVac, ultimaSuc, marca}
+    for(const row of data){
+      if(!row._date||row._date<cutoff)continue;
+      const pat=row.Tracto;
+      if(!pat)continue;
+      const km=Number(row.Kilometro)||0;
+      const esVacio=isVacioTrip(row);
+      if(!porTracto.has(pat)){
+        const fi=flota.get(pat);
+        const marca=(fi?.marca||"").toUpperCase().trim();
+        porTracto.set(pat,{
+          pat,kmCom:0,kmVac:0,tramosCom:0,tramosVac:0,
+          ultimaSuc:getSucursal(row.Destino),
+          ultimaFecha:row._date,
+          marca:marca.includes("SCANIA")?"SCANIA":marca.includes("VOLVO")?"VOLVO":marca||"—",
+          modelo:fi?.modelo||"—",
+          anio:fi?.fecha||"—",
+          enCatalogo:!!fi,
+        });
+      }
+      const t=porTracto.get(pat);
+      if(row._date>t.ultimaFecha){
+        t.ultimaFecha=row._date;
+        t.ultimaSuc=getSucursal(row.Destino);
+      }
+      if(esVacio){t.kmVac+=km;t.tramosVac++;}
+      else{t.kmCom+=km;t.tramosCom++;}
+    }
+    const arr=[];
+    for(const t of porTracto.values()){
+      const kmTotal=t.kmCom+t.kmVac;
+      if(kmTotal<minKm)continue;
+      const pctVacio=kmTotal>0?(t.kmVac/kmTotal*100):0;
+      arr.push({...t,kmTotal,pctVacio,tramosTotal:t.tramosCom+t.tramosVac});
+    }
+    return arr;
+  },[data,flota,today,months,minKm]);
+
+  const sucursales=useMemo(()=>[...new Set(stats.map(r=>r.ultimaSuc))].sort(),[stats]);
+  const marcas=useMemo(()=>[...new Set(stats.map(r=>r.marca))].sort(),[stats]);
+
+  const filtered=useMemo(()=>{
+    let f=stats;
+    if(filtroMarca!=="todas") f=f.filter(r=>r.marca===filtroMarca);
+    if(filtroSuc!=="todas") f=f.filter(r=>r.ultimaSuc===filtroSuc);
+    return f;
+  },[stats,filtroMarca,filtroSuc]);
+
+  const {sorted,sortKey,sortDir,toggle}=useSortable(filtered,"pctVacio","desc");
+  const totalP=Math.ceil(sorted.length/PP);
+  const pd=sorted.slice((pg-1)*PP,pg*PP);
+  useEffect(()=>setPg(1),[filtroMarca,filtroSuc,months,minKm]);
+
+  // Resumen global filtrado
+  const resumen=useMemo(()=>{
+    const kmCom=filtered.reduce((s,r)=>s+r.kmCom,0);
+    const kmVac=filtered.reduce((s,r)=>s+r.kmVac,0);
+    const pctVacio=(kmCom+kmVac)>0?(kmVac/(kmCom+kmVac)*100):0;
+    // Distribución por tramos de eficiencia
+    const buckets={excelente:0,bueno:0,regular:0,critico:0};
+    filtered.forEach(r=>{
+      if(r.pctVacio<=10)buckets.excelente++;
+      else if(r.pctVacio<=20)buckets.bueno++;
+      else if(r.pctVacio<=35)buckets.regular++;
+      else buckets.critico++;
+    });
+    return{kmCom,kmVac,pctVacio,buckets,total:filtered.length};
+  },[filtered]);
+
+  return(<div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
+      <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⚖️ Eficiencia por Tracto</h2>
+      <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+        <select value={months} onChange={e=>setMonths(+e.target.value)} style={sel}>
+          <option value={1}>1 mes</option><option value={2}>2 meses</option><option value={3}>3 meses</option><option value={6}>6 meses</option>
+        </select>
+        <select value={filtroMarca} onChange={e=>setFiltroMarca(e.target.value)} style={sel}>
+          <option value="todas">Todas marcas</option>
+          {marcas.map(m=><option key={m} value={m}>{m}</option>)}
+        </select>
+        <select value={filtroSuc} onChange={e=>setFiltroSuc(e.target.value)} style={sel}>
+          <option value="todas">Todas sucursales</option>
+          {sucursales.map(s=><option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={minKm} onChange={e=>setMinKm(+e.target.value)} style={sel}>
+          <option value={0}>Todos</option>
+          <option value={500}>Min. 500km</option>
+          <option value={2000}>Min. 2.000km</option>
+          <option value={5000}>Min. 5.000km</option>
+        </select>
+      </div>
+    </div>
+
+    <div style={{background:T.sf2,border:`1px solid ${T.bd}`,borderRadius:"10px",padding:"10px 16px",marginBottom:"14px",fontSize:"11px",color:T.txM}}>
+      <strong style={{color:T.tx}}>Criterio:</strong>
+      {" "}<span style={{color:T.grn}}>● ≤10% excelente</span>
+      {" · "}<span style={{color:T.blu}}>● 11-20% bueno</span>
+      {" · "}<span style={{color:T.ac}}>● 21-35% regular</span>
+      {" · "}<span style={{color:T.red}}>● {">"}35% crítico</span>
+      {" · % Vacío = km de remonta / km totales del tracto"}
+    </div>
+
+    <div style={{display:"flex",gap:"16px",flexWrap:"wrap",marginBottom:"16px"}}>
+      <StatCard T={T} icon="🚛" value={resumen.total} label="Tractos analizados"/>
+      <StatCard T={T} icon="🛣️" value={Math.round(resumen.kmCom/1000).toLocaleString("es-CL")+"K"} label="KM Comercial" color={T.grn}/>
+      <StatCard T={T} icon="🔄" value={Math.round(resumen.kmVac/1000).toLocaleString("es-CL")+"K"} label="KM Vacío" color={T.ac}/>
+      <StatCard T={T} icon="📊" value={resumen.pctVacio.toFixed(1)+"%"} label="% Vacío Global" color={resumen.pctVacio>25?T.red:resumen.pctVacio>15?T.ac:T.grn}/>
+    </div>
+
+    <div style={card}>
+      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>📊 Distribución de Eficiencia</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"12px"}}>
+        {[
+          {k:"excelente",label:"Excelente (≤10%)",color:T.grn},
+          {k:"bueno",label:"Bueno (11-20%)",color:T.blu},
+          {k:"regular",label:"Regular (21-35%)",color:T.ac},
+          {k:"critico",label:"Crítico (>35%)",color:T.red},
+        ].map(b=>{
+          const n=resumen.buckets[b.k];
+          const pct=resumen.total>0?(n/resumen.total*100):0;
+          return(
+            <div key={b.k} style={{background:T.sf2,borderRadius:"8px",padding:"14px",border:`1px solid ${b.color}33`,borderLeft:`4px solid ${b.color}`}}>
+              <div style={{fontSize:"24px",fontWeight:700,color:b.color}}>{n}</div>
+              <div style={{fontSize:"11px",color:T.txM,marginTop:"2px"}}>{b.label}</div>
+              <div style={{fontSize:"11px",color:T.tx,marginTop:"4px",fontWeight:600}}>{pct.toFixed(1)}% de flota</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+
+    <div style={card}>
+      <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>
+        <strong style={{color:T.tx}}>{sorted.length}</strong> tractos · Click columna para ordenar · Ordenado por mayor % vacío (los más ineficientes arriba)
+      </div>
+      <div style={{overflowX:"auto",maxHeight:"600px",overflowY:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
+          <thead><tr>
+            <SortTh label="Tracto" col="pat" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={th}/>
+            <SortTh label="Marca" col="marca" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={th}/>
+            <SortTh label="Sucursal" col="ultimaSuc" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={th}/>
+            <SortTh label="KM Com." col="kmCom" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...th,textAlign:"right"}}/>
+            <SortTh label="KM Vacío" col="kmVac" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...th,textAlign:"right"}}/>
+            <SortTh label="KM Total" col="kmTotal" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...th,textAlign:"right"}}/>
+            <SortTh label="% Vacío" col="pctVacio" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...th,textAlign:"right"}}/>
+            <th style={{...th,textAlign:"center"}}>Distribución</th>
+            <SortTh label="Tramos" col="tramosTotal" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...th,textAlign:"right"}}/>
+          </tr></thead>
+          <tbody>{pd.map((r,i)=>{
+            const c=r.pctVacio<=10?T.grn:r.pctVacio<=20?T.blu:r.pctVacio<=35?T.ac:T.red;
+            const pctCom=100-r.pctVacio;
+            return(
+              <tr key={r.pat} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
+                <td style={{...td,fontWeight:700}}>{r.pat}</td>
+                <td style={td}>{r.marca}</td>
+                <td style={td}><SucBadge s={r.ultimaSuc} T={T}/></td>
+                <td style={{...td,textAlign:"right",color:T.grn,fontWeight:600}}>{r.kmCom.toLocaleString("es-CL")}</td>
+                <td style={{...td,textAlign:"right",color:T.ac,fontWeight:600}}>{r.kmVac.toLocaleString("es-CL")}</td>
+                <td style={{...td,textAlign:"right",fontWeight:700}}>{r.kmTotal.toLocaleString("es-CL")}</td>
+                <td style={{...td,textAlign:"right",color:c,fontWeight:700}}>{r.pctVacio.toFixed(1)}%</td>
+                <td style={{...td,textAlign:"center"}}>
+                  <div style={{display:"inline-flex",height:"8px",width:"100px",borderRadius:"4px",overflow:"hidden",border:`1px solid ${T.bd}`,background:T.sf2}}>
+                    <div style={{width:pctCom+"%",background:T.grn}} title={"Comercial: "+pctCom.toFixed(1)+"%"}/>
+                    <div style={{width:r.pctVacio+"%",background:c}} title={"Vacío: "+r.pctVacio.toFixed(1)+"%"}/>
+                  </div>
+                </td>
+                <td style={{...td,textAlign:"right"}}>{r.tramosTotal}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table>
+      </div>
+      <Pager T={T} page={pg} total={totalP} set={setPg}/>
+    </div>
+  </div>);
+}
+
+// ═══ VIEW 4: POR CLIENTE ═══
 function StatsCliente({data,today,T}){
   const[months,setMonths]=useState(1);const[sortBy,setSortBy]=useState("km");
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
@@ -755,17 +1259,12 @@ function StatsCliente({data,today,T}){
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
   const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
 
-  // Calcular stats de clientes Y stats de vacíos por separado
   const {rawStats, vacioStats, totalKmConVacios} = useMemo(()=>{
     const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
     const allFiltered = months===99 ? data : data.filter(d=>d._date>=cutoff);
-
-    // Stats de viajes vacíos/remonta (SIN_SOLICITUD)
     const vacios = allFiltered.filter(d => isVacioTrip(d));
     const vacioKm = vacios.reduce((s, d) => s + (Number(d.Kilometro) || 0), 0);
     const vacioTramos = vacios.length;
-
-    // Top rutas vacías
     const rutasVacias = {};
     vacios.forEach(d => {
       const k = d.Origen + " → " + d.Destino;
@@ -774,16 +1273,11 @@ function StatsCliente({data,today,T}){
       rutasVacias[k].count++;
     });
     const topRutasVacias = Object.values(rutasVacias).sort((a, b) => b.km - a.km).slice(0, 5);
-
-    // Stats de clientes reales (excluye vacíos)
     const filtered = allFiltered.filter(d => !isVacioTrip(d));
     const byC={};
     filtered.forEach(d=>{const c=d.Cliente;if(!byC[c])byC[c]={cliente:c,km:0,tramos:0,sols:new Set(),cargas:{}};byC[c].km+=Number(d.Kilometro)||0;byC[c].tramos++;if(d.Solicitud)byC[c].sols.add(d.Solicitud);const cg=d.Carga?.trim();if(cg&&!/^\d+$/.test(cg))byC[c].cargas[cg]=(byC[c].cargas[cg]||0)+1;});
     const clienteStats = Object.values(byC).map(c=>({...c,sols:c.sols.size,topCargas:Object.entries(c.cargas).sort((a,b)=>b[1]-a[1]).slice(0,3)}));
-
-    // KM total incluyendo vacíos (para calcular % real sobre el total)
     const totalConVacios = clienteStats.reduce((s, c) => s + c.km, 0) + vacioKm;
-
     return {
       rawStats: clienteStats,
       vacioStats: {km: vacioKm, tramos: vacioTramos, topRutas: topRutasVacias},
@@ -793,7 +1287,6 @@ function StatsCliente({data,today,T}){
 
   const{sorted,sortKey,sortDir,toggle}=useSortable(rawStats,sortBy,"desc");
   const totalKmClientes=rawStats.reduce((s,c)=>s+c.km,0);
-
   const pctVacio = totalKmConVacios > 0 ? (vacioStats.km / totalKmConVacios * 100) : 0;
 
   return(<div>
@@ -802,7 +1295,6 @@ function StatsCliente({data,today,T}){
       <select value={months} onChange={e=>setMonths(+e.target.value)} style={sel}><option value={1}>1 mes</option><option value={2}>2 meses</option><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>1 año</option><option value={99}>Todo</option></select>
     </div>
 
-    {/* ── TARJETA RESUMEN KM VACÍOS / RETORNO ── */}
     {vacioStats.tramos > 0 && (
       <div style={{
         background: T.isDark ? "#1a1820" : "#fefce8",
@@ -847,7 +1339,6 @@ function StatsCliente({data,today,T}){
             </div>
           </div>
 
-          {/* Barra visual vacíos vs comerciales */}
           <div style={{minWidth:"200px",flex:"0 0 240px"}}>
             <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"8px"}}>DISTRIBUCIÓN KM TOTAL</div>
             <div style={{height:"24px",background:T.sf2,borderRadius:"8px",overflow:"hidden",border:`1px solid ${T.bd}`,display:"flex"}}>
@@ -859,7 +1350,6 @@ function StatsCliente({data,today,T}){
               <span><span style={{display:"inline-block",width:"8px",height:"8px",borderRadius:"2px",background:T.ac,marginRight:"4px",verticalAlign:"middle"}}/>Vacío ({pctVacio.toFixed(1)}%)</span>
             </div>
 
-            {/* Top rutas vacías */}
             {vacioStats.topRutas.length > 0 && (
               <div style={{marginTop:"14px"}}>
                 <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"6px"}}>TOP RUTAS VACÍAS</div>
@@ -876,7 +1366,6 @@ function StatsCliente({data,today,T}){
       </div>
     )}
 
-    {/* ── TABLA RANKING CLIENTES (sin vacíos) ── */}
     <div style={card}>
       <div style={{marginBottom:"8px",fontSize:"11px",color:T.txM}}>Click en columna para ordenar · Excluye viajes de remonta/vacío · % calculado sobre KM comerciales</div>
       <div style={{maxHeight:"500px",overflowY:"auto",overflowX:"auto"}}>
@@ -1063,7 +1552,7 @@ function Detalle({data,T}){
   </div>);
 }
 
-// ═══ VIEW 7: INVENTARIO DE FLOTA ═══
+// ═══ VIEW 7: INVENTARIO ═══
 function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
   const[filtTipo,setFiltTipo]=useState("");const[filtYear,setFiltYear]=useState("");const[filtMarca,setFiltMarca]=useState("");const[filtCat,setFiltCat]=useState("");const[filtEstado,setFiltEstado]=useState("");const[pg,setPg]=useState(1);const pp=50;
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
@@ -1210,7 +1699,7 @@ function Inventario({flota,tractoIdx,ramplaIdx,ultimosMap,today,T}){
 }
 
 // ═══ VIEW 8: COMPARACIÓN MES ═══
-function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
+function ComparacionMes({data, today, T}) {
   const card = {background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const sel = {background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
   const thStyle = {textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
@@ -1430,537 +1919,492 @@ function ComparacionMes({data, tractoIdx, ramplaIdx, flota, today, T}) {
   </div>);
 }
 
-// ═══ VIEW 9: COMBUSTIBLE ═══
-function Combustible({data, flota, tractoIdx, today, T}) {
+// ═══ VIEW 9: COMBUSTIBLE (rendPromedio ponderado por KM recorridos) ═══
+function Combustible({data, flota, today, T}) {
+  const [months, setMonths] = useState(1);
+  const [rendScania, setRendScania] = useState(3.3);
+  const [rendVolvo, setRendVolvo] = useState(2.8);
+  const [precioLitro, setPrecioLitro] = useState(1244);
+
   const card = {background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const sel = {background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
-  const inputStyle = {background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"10px 14px",color:T.tx,fontSize:"14px",fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
+  const input = {background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"13px",fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box"};
   const thStyle = {textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
   const td = {padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
 
-  const [months, setMonths] = useState(0);
-  const [filtroSuc, setFiltroSuc] = useState("todas");
-  const [precioDiesel, setPrecioDiesel] = useState(1244);
-
-  const REND = {SCANIA: 3.3, VOLVO: 2.8};
-
-  const tractoMarca = useMemo(() => {
-    const m = new Map();
-    for (const [pat, v] of flota.entries()) {
-      if (getCategoria(v.tipoequipo) !== "TRACTOCAMION") continue;
-      const marca = (v.marca || "").toUpperCase().trim();
-      if (marca.includes("SCANIA")) m.set(pat, "SCANIA");
-      else m.set(pat, "VOLVO");
-    }
-    return m;
+  // Normalizador de marca
+  const getMarcaNorm = useCallback((pat) => {
+    const fi = flota.get(pat);
+    if (!fi) return "VOLVO"; // default conservador
+    const m = (fi.marca || "").toUpperCase().trim();
+    if (m.includes("SCANIA")) return "SCANIA";
+    if (m.includes("VOLVO")) return "VOLVO";
+    return "VOLVO";
   }, [flota]);
 
-  const rendPromedio = useMemo(() => {
-    let totalW = 0, count = 0;
-    for (const [, marca] of tractoMarca) {
-      totalW += REND[marca] || REND.VOLVO;
-      count++;
-    }
-    return count > 0 ? (totalW / count) : REND.VOLVO;
-  }, [tractoMarca]);
+  const stats = useMemo(() => {
+    const cutoff = new Date(today);
+    cutoff.setMonth(cutoff.getMonth() - months);
 
-  const monthlyStats = useMemo(() => {
-    let filtered;
-    if (months === 0) {
-      const mk = getMonthKey(today);
-      filtered = data.filter(r => getMonthKey(r._date) === mk && r.Cliente !== SIN_SOLICITUD);
-    } else if (months === -1) {
-      const prev = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-      const mk = getMonthKey(prev);
-      filtered = data.filter(r => getMonthKey(r._date) === mk && r.Cliente !== SIN_SOLICITUD);
-    } else {
-      const cutoff = new Date(today);
-      cutoff.setMonth(cutoff.getMonth() - months);
-      filtered = data.filter(r => r._date >= cutoff && r.Cliente !== SIN_SOLICITUD);
-    }
-    const byMonth = {};
-    filtered.forEach(r => {
-      const mk = getMonthKey(r._date);
-      if (!byMonth[mk]) byMonth[mk] = {km: 0, tramos: 0, tractos: new Set(), bySuc: {}, byMarca: {SCANIA:{km:0,tramos:0}, VOLVO:{km:0,tramos:0}}};
-      const km = Number(r.Kilometro) || 0;
-      byMonth[mk].km += km;
-      byMonth[mk].tramos++;
-      if (r.Tracto) byMonth[mk].tractos.add(r.Tracto);
-      const suc = getSucursal(r.Destino);
-      if (!byMonth[mk].bySuc[suc]) byMonth[mk].bySuc[suc] = {km: 0, tramos: 0};
-      byMonth[mk].bySuc[suc].km += km;
-      byMonth[mk].bySuc[suc].tramos++;
-      const marca = tractoMarca.get(r.Tracto) || "VOLVO";
-      byMonth[mk].byMarca[marca].km += km;
-      byMonth[mk].byMarca[marca].tramos++;
-    });
-    const months_sorted = Object.keys(byMonth).sort();
-    return months_sorted.map(mk => ({
-      mes: mk, label: monthKeyToLabel(mk), km: byMonth[mk].km, tramos: byMonth[mk].tramos,
-      tractos: byMonth[mk].tractos.size, kmPorTramo: byMonth[mk].tramos > 0 ? Math.round(byMonth[mk].km / byMonth[mk].tramos) : 0,
-      bySuc: byMonth[mk].bySuc, byMarca: byMonth[mk].byMarca,
-    }));
-  }, [data, today, months, tractoMarca]);
+    // KM por tracto + por marca (SOLO comercial, sin vacío)
+    const kmPorTracto = new Map();
+    let kmScaniaCom = 0, kmVolvoCom = 0;
+    let kmScaniaVac = 0, kmVolvoVac = 0;
 
-  const sucursalesDisp = useMemo(() => {
-    const s = new Set();
-    monthlyStats.forEach(m => Object.keys(m.bySuc).forEach(k => s.add(k)));
-    return [...s].sort();
-  }, [monthlyStats]);
+    for (const row of data) {
+      if (!row._date || row._date < cutoff) continue;
+      const pat = row.Tracto;
+      if (!pat) continue;
+      const km = Number(row.Kilometro) || 0;
+      const marca = getMarcaNorm(pat);
+      const esVacio = isVacioTrip(row);
 
-  const displayStats = useMemo(() => {
-    if (filtroSuc === "todas") return monthlyStats;
-    return monthlyStats.map(m => {
-      const sData = m.bySuc[filtroSuc] || {km: 0, tramos: 0};
-      return {...m, km: sData.km, tramos: sData.tramos, kmPorTramo: sData.tramos > 0 ? Math.round(sData.km / sData.tramos) : 0};
-    });
-  }, [monthlyStats, filtroSuc]);
-
-  const maxKm = Math.max(...displayStats.map(m => m.km), 1);
-
-  const calcLitrosMarca = useCallback((byMarca) => {
-    const sc = (byMarca.SCANIA?.km || 0) / REND.SCANIA;
-    const vo = (byMarca.VOLVO?.km || 0) / REND.VOLVO;
-    return {scania: Math.round(sc), volvo: Math.round(vo), total: Math.round(sc + vo)};
-  }, []);
-
-  const withDelta = displayStats.map((m, i) => {
-    const prev = i > 0 ? displayStats[i - 1] : null;
-    const litrosMarca = calcLitrosMarca(m.byMarca || {SCANIA:{km:0},VOLVO:{km:0}});
-    return {
-      ...m,
-      deltaKm: prev ? ((m.km - prev.km) / Math.max(prev.km, 1) * 100) : null,
-      litrosEst: litrosMarca.total, litrosMarca,
-      costoEst: litrosMarca.total * precioDiesel,
-    };
-  });
-
-  const DeltaBadge = ({val}) => {
-    if (val === null || val === undefined || !isFinite(val)) return <span style={{color:T.txM,fontSize:"11px"}}>—</span>;
-    const pos = val >= 0;
-    const color = pos ? T.grn : T.red;
-    return (
-      <span style={{display:"inline-flex",alignItems:"center",gap:"2px",padding:"2px 8px",borderRadius:"20px",fontSize:"11px",fontWeight:700,background:`${color}18`,color,border:`1px solid ${color}44`}}>
-        {pos ? "▲" : "▼"} {Math.abs(val).toFixed(1)}%
-      </span>
-    );
-  };
-
-  const totalKm = withDelta.reduce((s, m) => s + m.km, 0);
-  const totalTramos = withDelta.reduce((s, m) => s + m.tramos, 0);
-  const totalLitros = withDelta.reduce((s, m) => s + m.litrosEst, 0);
-  const totalCosto = withDelta.reduce((s, m) => s + m.costoEst, 0);
-  const avgKmMes = withDelta.length > 0 ? Math.round(totalKm / withDelta.length) : 0;
-
-  const marcaAcum = useMemo(() => {
-    const acc = {SCANIA:{km:0,tramos:0}, VOLVO:{km:0,tramos:0}};
-    monthlyStats.forEach(m => {
-      for (const mk of ["SCANIA","VOLVO"]) {
-        acc[mk].km += (m.byMarca[mk]?.km || 0);
-        acc[mk].tramos += (m.byMarca[mk]?.tramos || 0);
+      if (!kmPorTracto.has(pat)) {
+        kmPorTracto.set(pat, {pat, marca, kmCom: 0, kmVac: 0, tramosCom: 0, tramosVac: 0});
       }
-    });
-    return acc;
-  }, [monthlyStats]);
+      const t = kmPorTracto.get(pat);
+      if (esVacio) {
+        t.kmVac += km;
+        t.tramosVac++;
+        if (marca === "SCANIA") kmScaniaVac += km;
+        else kmVolvoVac += km;
+      } else {
+        t.kmCom += km;
+        t.tramosCom++;
+        if (marca === "SCANIA") kmScaniaCom += km;
+        else kmVolvoCom += km;
+      }
+    }
 
-  const sucAcum = useMemo(() => {
-    const acc = {};
-    monthlyStats.forEach(m => {
-      Object.entries(m.bySuc).forEach(([s, v]) => {
-        if (!acc[s]) acc[s] = {km: 0, tramos: 0};
-        acc[s].km += v.km;
-        acc[s].tramos += v.tramos;
+    const kmTotalCom = kmScaniaCom + kmVolvoCom;
+    const kmTotalVac = kmScaniaVac + kmVolvoVac;
+    const kmTotal = kmTotalCom + kmTotalVac;
+
+    // Litros consumidos por marca (comercial + vacío — ambos consumen diesel)
+    const litrosScania = (kmScaniaCom + kmScaniaVac) / rendScania;
+    const litrosVolvo = (kmVolvoCom + kmVolvoVac) / rendVolvo;
+    const litrosTotal = litrosScania + litrosVolvo;
+
+    // RENDIMIENTO PROMEDIO PONDERADO POR KM REALES
+    // Si SCANIA recorre más km que VOLVO, su rendimiento pesa más en el promedio
+    const rendPromedio = litrosTotal > 0 ? (kmTotal / litrosTotal) : rendVolvo;
+
+    // Costo total
+    const costoTotal = litrosTotal * precioLitro;
+    const costoScania = litrosScania * precioLitro;
+    const costoVolvo = litrosVolvo * precioLitro;
+
+    // Costo por km (promedio real)
+    const costoPorKm = kmTotal > 0 ? (costoTotal / kmTotal) : 0;
+    const costoPorKmComercial = kmTotalCom > 0 ? (costoTotal / kmTotalCom) : 0;
+
+    // Ranking de tractos por consumo
+    const rankingTractos = [];
+    for (const t of kmPorTracto.values()) {
+      const rend = t.marca === "SCANIA" ? rendScania : rendVolvo;
+      const kmT = t.kmCom + t.kmVac;
+      if (kmT === 0) continue;
+      const litros = kmT / rend;
+      const costo = litros * precioLitro;
+      const pctVacio = kmT > 0 ? (t.kmVac / kmT * 100) : 0;
+      rankingTractos.push({
+        ...t,
+        kmTotal: kmT,
+        litros,
+        costo,
+        costoVacio: (t.kmVac / rend) * precioLitro,
+        pctVacio,
       });
-    });
-    return Object.entries(acc).sort((a, b) => b[1].km - a[1].km);
-  }, [monthlyStats]);
+    }
+    rankingTractos.sort((a, b) => b.costo - a.costo);
 
-  const fmtM = (v) => {
-    if (v >= 1e9) return "$" + (v/1e9).toFixed(1) + "MM";
-    if (v >= 1e6) return "$" + Math.round(v/1e6).toLocaleString("es-CL") + "M";
-    return "$" + Math.round(v).toLocaleString("es-CL");
-  };
+    return {
+      kmScaniaCom, kmVolvoCom, kmScaniaVac, kmVolvoVac,
+      kmTotalCom, kmTotalVac, kmTotal,
+      litrosScania, litrosVolvo, litrosTotal,
+      costoScania, costoVolvo, costoTotal,
+      costoPorKm, costoPorKmComercial,
+      rendPromedio,
+      tractosScania: [...kmPorTracto.values()].filter(t => t.marca === "SCANIA").length,
+      tractosVolvo: [...kmPorTracto.values()].filter(t => t.marca === "VOLVO").length,
+      rankingTractos,
+    };
+  }, [data, today, months, rendScania, rendVolvo, precioLitro, getMarcaNorm]);
+
+  const {sorted, sortKey, sortDir, toggle} = useSortable(stats.rankingTractos, "costo", "desc");
+  const fmtCLP = (v) => "$" + Math.round(v).toLocaleString("es-CL");
+
+  const pctVacioGlobal = stats.kmTotal > 0 ? (stats.kmTotalVac / stats.kmTotal * 100) : 0;
+  const costoVacioTotal = (stats.kmScaniaVac / rendScania + stats.kmVolvoVac / rendVolvo) * precioLitro;
 
   return (<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
-      <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⛽ Combustible y KM</h2>
-      <div style={{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"}}>
-        <select value={filtroSuc} onChange={e => setFiltroSuc(e.target.value)} style={sel}>
-          <option value="todas">Todas las sucursales</option>
-          {sucursalesDisp.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select value={months} onChange={e => setMonths(+e.target.value)} style={sel}>
-          <option value={0}>Mes actual</option><option value={-1}>Mes anterior</option><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option><option value={99}>Todo</option>
-        </select>
-      </div>
+      <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⛽ Estimación de Combustible</h2>
+      <select value={months} onChange={e => setMonths(+e.target.value)} style={sel}>
+        <option value={1}>1 mes</option><option value={2}>2 meses</option>
+        <option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>1 año</option>
+      </select>
     </div>
 
-    <div style={{...card,borderLeft:`4px solid ${T.red}`,background:T.isDark?"#1a1518":T.sf}}>
-      <div style={{fontSize:"14px",fontWeight:700,marginBottom:"12px",color:T.tx}}>⛽ Parámetros de Costo Combustible</div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:"16px",alignItems:"end"}}>
+    <div style={{background:T.sf2,border:`1px solid ${T.bd}`,borderRadius:"10px",padding:"10px 16px",marginBottom:"14px",fontSize:"11px",color:T.txM,display:"flex",alignItems:"flex-start",gap:"8px"}}>
+      <span style={{fontSize:"14px",marginTop:"1px"}}>ℹ️</span>
+      <span>
+        <strong style={{color:T.tx}}>Rendimiento promedio ponderado por KM recorridos:</strong>
+        {" "}si SCANIA recorre más km que VOLVO, su rendimiento pesa más en el cálculo global.
+        Formula: <code style={{background:T.sf,padding:"1px 5px",borderRadius:"3px",color:T.ac}}>KM Total / (KM_Scania÷Rend_Scania + KM_Volvo÷Rend_Volvo)</code>.
+        El consumo se calcula sobre KM comerciales + vacío (ambos consumen diesel).
+      </span>
+    </div>
+
+    <div style={card}>
+      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>⚙️ Parámetros de Cálculo</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:"12px"}}>
         <div>
-          <label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px",display:"block",marginBottom:"4px"}}>PRECIO DIÉSEL ($/litro neto)</label>
-          <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
-            <span style={{fontSize:"16px",fontWeight:700,color:T.red}}>$</span>
-            <input type="number" value={precioDiesel} onChange={e => setPrecioDiesel(Math.max(0, Number(e.target.value) || 0))}
-              style={{...inputStyle,width:"130px",fontSize:"18px",fontWeight:700,color:T.red,textAlign:"right"}}
-              step={10} min={0}
-            />
-          </div>
-          <div style={{fontSize:"10px",color:T.txM,marginTop:"4px"}}>Edita para simular costos con distintos precios</div>
+          <label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>REND. SCANIA (km/lt)</label>
+          <input type="number" step="0.1" min="0" value={rendScania} onChange={e => setRendScania(+e.target.value || 0)} style={input}/>
         </div>
-        <div style={{background:T.sf2,borderRadius:"10px",padding:"14px",border:`1px solid ${T.bd}`}}>
-          <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"8px"}}>RENDIMIENTO POR MARCA (km/litro)</div>
-          <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:"20px",fontWeight:700,color:"#3b82f6"}}>{REND.SCANIA}</div>
-              <div style={{fontSize:"10px",color:T.txM}}>SCANIA</div>
-            </div>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:"20px",fontWeight:700,color:"#8b5cf6"}}>{REND.VOLVO}</div>
-              <div style={{fontSize:"10px",color:T.txM}}>VOLVO</div>
-            </div>
-          </div>
-          <div style={{fontSize:"10px",color:T.txM,marginTop:"6px"}}>Promedio ponderado flota: <strong style={{color:T.tx}}>{rendPromedio.toFixed(2)} km/lt</strong></div>
+        <div>
+          <label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>REND. VOLVO (km/lt)</label>
+          <input type="number" step="0.1" min="0" value={rendVolvo} onChange={e => setRendVolvo(+e.target.value || 0)} style={input}/>
         </div>
-        <div style={{background:`${T.red}0a`,borderRadius:"10px",padding:"14px",border:`1px solid ${T.red}33`}}>
-          <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"4px"}}>COSTO ESTIMADO PERÍODO</div>
-          <div style={{fontSize:"24px",fontWeight:700,color:T.red}}>{fmtM(totalCosto)}</div>
-          <div style={{fontSize:"10px",color:T.txM,marginTop:"2px"}}>{totalLitros.toLocaleString("es-CL")} litros × ${precioDiesel.toLocaleString("es-CL")}/lt</div>
+        <div>
+          <label style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"0.5px"}}>PRECIO DIESEL ($/lt)</label>
+          <input type="number" step="1" min="0" value={precioLitro} onChange={e => setPrecioLitro(+e.target.value || 0)} style={input}/>
         </div>
       </div>
     </div>
 
     <div style={{display:"flex",gap:"16px",flexWrap:"wrap",marginBottom:"16px"}}>
-      <StatCard T={T} icon="🛣️" value={Math.round(totalKm / 1000).toLocaleString("es-CL") + "K"} label="KM Totales" color={T.grn}/>
-      <StatCard T={T} icon="📋" value={totalTramos.toLocaleString("es-CL")} label="Tramos"/>
-      <StatCard T={T} icon="⛽" value={Math.round(totalLitros / 1000).toLocaleString("es-CL") + "K"} label="Litros Est." color={T.red}/>
-      <StatCard T={T} icon="📊" value={avgKmMes.toLocaleString("es-CL")} label="KM Prom./Mes" color={T.blu}/>
+      <StatCard T={T} icon="🛣️" value={Math.round(stats.kmTotal/1000).toLocaleString("es-CL")+"K"} label="KM Totales"/>
+      <StatCard T={T} icon="⛽" value={Math.round(stats.litrosTotal).toLocaleString("es-CL")+" L"} label="Consumo Total" color={T.ac}/>
+      <StatCard T={T} icon="💰" value={fmtCLP(stats.costoTotal)} label="Costo Total" color={T.red}/>
+      <StatCard T={T} icon="📊" value={stats.rendPromedio.toFixed(2)+" km/L"} label="Rend. Promedio" color={T.blu}/>
+      <StatCard T={T} icon="💵" value={fmtCLP(stats.costoPorKm)+"/km"} label="Costo/KM"/>
     </div>
 
-    <div style={card}>
-      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"14px",color:T.tx}}>🚛 Consumo Estimado por Marca de Tracto</div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"12px"}}>
-        {[
-          {marca:"SCANIA",color:"#3b82f6",rend:REND.SCANIA,data:marcaAcum.SCANIA},
-          {marca:"VOLVO",color:"#8b5cf6",rend:REND.VOLVO,data:marcaAcum.VOLVO},
-        ].map(b => {
-          const litros = b.data.km > 0 ? Math.round(b.data.km / b.rend) : 0;
-          const costo = litros * precioDiesel;
-          const pctKm = totalKm > 0 ? (b.data.km / totalKm * 100) : 0;
-          return (
-            <div key={b.marca} style={{background:T.sf2,borderRadius:"10px",padding:"16px",border:`1px solid ${T.bd}`,borderTop:`3px solid ${b.color}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px"}}>
-                <span style={{fontSize:"13px",fontWeight:700,color:b.color}}>{b.marca}</span>
-                <span style={{fontSize:"10px",color:T.txM}}>{b.rend} km/lt</span>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
-                <div>
-                  <div style={{fontSize:"10px",color:T.txM}}>KM</div>
-                  <div style={{fontSize:"14px",fontWeight:700,color:T.tx}}>{Math.round(b.data.km / 1000).toLocaleString("es-CL")}K</div>
-                </div>
-                <div>
-                  <div style={{fontSize:"10px",color:T.txM}}>Tramos</div>
-                  <div style={{fontSize:"14px",fontWeight:700,color:T.tx}}>{b.data.tramos.toLocaleString("es-CL")}</div>
-                </div>
-                <div>
-                  <div style={{fontSize:"10px",color:T.txM}}>Litros Est.</div>
-                  <div style={{fontSize:"14px",fontWeight:700,color:T.red}}>{litros.toLocaleString("es-CL")}</div>
-                </div>
-                <div>
-                  <div style={{fontSize:"10px",color:T.txM}}>Costo Est.</div>
-                  <div style={{fontSize:"14px",fontWeight:700,color:T.red}}>{fmtM(costo)}</div>
-                </div>
-              </div>
-              <div style={{marginTop:"8px"}}>
-                <div style={{height:"6px",background:T.sf,borderRadius:"3px",border:`1px solid ${T.bd}`,overflow:"hidden"}}>
-                  <div style={{height:"100%",width:pctKm+"%",background:b.color,borderRadius:"3px"}}/>
-                </div>
-                <div style={{fontSize:"9px",color:T.txM,marginTop:"2px",textAlign:"right"}}>{pctKm.toFixed(1)}% del KM total</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-
-    {displayStats.length > 1 && <div style={card}>
-      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"14px",color:T.tx}}>📈 Evolución Mensual</div>
-      <div style={{overflowX:"auto"}}>
-        {displayStats.map((m, i) => {
-          const prev = i > 0 ? displayStats[i - 1] : null;
-          const deltaKm = prev ? ((m.km - prev.km) / Math.max(prev.km, 1) * 100) : null;
-          const litros = calcLitrosMarca(m.byMarca || {SCANIA:{km:0},VOLVO:{km:0}});
-          const costo = litros.total * precioDiesel;
-          return (
-            <div key={m.mes} style={{marginBottom:"10px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"4px"}}>
-                <span style={{fontSize:"12px",fontWeight:600,color:T.tx,minWidth:"80px"}}>{m.label}</span>
-                <div style={{display:"flex",gap:"12px",alignItems:"center",fontSize:"11px"}}>
-                  <span style={{color:T.tx}}>{m.km.toLocaleString("es-CL")} km</span>
-                  <span style={{color:T.red}}>{litros.total.toLocaleString("es-CL")} lt</span>
-                  <span style={{color:T.red,fontWeight:600}}>{fmtM(costo)}</span>
-                  {deltaKm !== null && <DeltaBadge val={deltaKm}/>}
-                </div>
-              </div>
-              <div style={{height:"14px",background:T.sf2,borderRadius:"7px",border:`1px solid ${T.bd}`,overflow:"hidden",display:"flex"}}>
-                {m.byMarca.SCANIA && m.byMarca.SCANIA.km > 0 && (
-                  <div style={{height:"100%",width:(m.byMarca.SCANIA.km / maxKm * 100)+"%",background:"#3b82f6",transition:"width 0.3s"}} title={"Scania: "+m.byMarca.SCANIA.km.toLocaleString("es-CL")+" km"}/>
-                )}
-                {m.byMarca.VOLVO && m.byMarca.VOLVO.km > 0 && (
-                  <div style={{height:"100%",width:(m.byMarca.VOLVO.km / maxKm * 100)+"%",background:"#8b5cf6",transition:"width 0.3s"}} title={"Volvo: "+m.byMarca.VOLVO.km.toLocaleString("es-CL")+" km"}/>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        <div style={{display:"flex",gap:"16px",marginTop:"8px",fontSize:"10px",color:T.txM}}>
-          <span><span style={{display:"inline-block",width:"10px",height:"10px",borderRadius:"2px",background:"#3b82f6",marginRight:"4px",verticalAlign:"middle"}}/>Scania</span>
-          <span><span style={{display:"inline-block",width:"10px",height:"10px",borderRadius:"2px",background:"#8b5cf6",marginRight:"4px",verticalAlign:"middle"}}/>Volvo</span>
-        </div>
-      </div>
-    </div>}
-
+    {/* Breakdown por marca */}
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px",marginBottom:"16px"}}>
-      <div style={card}>
-        <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>📊 Detalle por Mes</div>
-        <div style={{maxHeight:"400px",overflowY:"auto",overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
-            <thead><tr>
-              <th style={thStyle}>Mes</th><th style={thStyle}>KM</th><th style={thStyle}>Δ</th>
-              <th style={thStyle}>Tramos</th><th style={thStyle}>Litros</th><th style={thStyle}>Costo Est.</th>
-            </tr></thead>
-            <tbody>{withDelta.map((m, i) => (
-              <tr key={m.mes} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
-                <td style={{...td,fontWeight:600}}>{m.label}</td>
-                <td style={td}>{m.km.toLocaleString("es-CL")}</td>
-                <td style={td}><DeltaBadge val={m.deltaKm}/></td>
-                <td style={td}>{m.tramos.toLocaleString("es-CL")}</td>
-                <td style={{...td,color:T.red,fontWeight:600}}>{m.litrosEst.toLocaleString("es-CL")}</td>
-                <td style={{...td,color:T.red,fontWeight:600}}>{fmtM(m.costoEst)}</td>
-              </tr>
-            ))}</tbody>
-          </table>
+      <div style={{...card,borderLeft:`4px solid ${T.blu}`}}>
+        <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.blu}}>🔵 SCANIA ({stats.tractosScania} tractos)</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",fontSize:"12px"}}>
+          <div>
+            <div style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>KM COMERCIAL</div>
+            <div style={{fontWeight:700,color:T.grn,fontSize:"16px"}}>{stats.kmScaniaCom.toLocaleString("es-CL")}</div>
+          </div>
+          <div>
+            <div style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>KM VACÍO</div>
+            <div style={{fontWeight:700,color:T.ac,fontSize:"16px"}}>{stats.kmScaniaVac.toLocaleString("es-CL")}</div>
+          </div>
+          <div>
+            <div style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>LITROS</div>
+            <div style={{fontWeight:700,color:T.tx,fontSize:"16px"}}>{Math.round(stats.litrosScania).toLocaleString("es-CL")} L</div>
+          </div>
+          <div>
+            <div style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>COSTO</div>
+            <div style={{fontWeight:700,color:T.red,fontSize:"16px"}}>{fmtCLP(stats.costoScania)}</div>
+          </div>
+        </div>
+        <div style={{marginTop:"12px",paddingTop:"12px",borderTop:`1px solid ${T.bd}`,fontSize:"11px",color:T.txM}}>
+          Rend: <strong style={{color:T.blu}}>{rendScania} km/L</strong> · Costo/km: <strong style={{color:T.red}}>{fmtCLP(precioLitro/rendScania)}/km</strong>
         </div>
       </div>
 
-      <div style={card}>
-        <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>🗺️ KM Acumulado por Sucursal</div>
-        <div style={{maxHeight:"400px",overflowY:"auto"}}>
-          {sucAcum.map(([s, v]) => {
-            const litros = Math.round(v.km / rendPromedio);
-            const costo = litros * precioDiesel;
-            const pct = totalKm > 0 ? (v.km / totalKm * 100) : 0;
-            return (
-              <div key={s} style={{marginBottom:"10px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:"3px",alignItems:"center"}}>
-                  <SucBadge s={s} T={T}/>
-                  <span style={{fontSize:"11px",color:T.txM}}>
-                    {Math.round(v.km / 1000).toLocaleString("es-CL")}K km · ~{Math.round(litros / 1000).toLocaleString("es-CL")}K lt · {fmtM(costo)}
-                  </span>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
-                  <div style={{flex:1,height:"8px",background:T.sf2,borderRadius:"4px",border:`1px solid ${T.bd}`,overflow:"hidden"}}>
-                    <div style={{height:"100%",width:pct+"%",background:T.sucColors[s]?.accent||T.ac,borderRadius:"4px",transition:"width 0.3s"}}/>
-                  </div>
-                  <span style={{fontSize:"10px",color:T.txM,minWidth:"38px",textAlign:"right"}}>{pct.toFixed(1)}%</span>
-                </div>
-              </div>
-            );
-          })}
+      <div style={{...card,borderLeft:`4px solid ${T.ac}`}}>
+        <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.ac}}>🟠 VOLVO ({stats.tractosVolvo} tractos)</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",fontSize:"12px"}}>
+          <div>
+            <div style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>KM COMERCIAL</div>
+            <div style={{fontWeight:700,color:T.grn,fontSize:"16px"}}>{stats.kmVolvoCom.toLocaleString("es-CL")}</div>
+          </div>
+          <div>
+            <div style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>KM VACÍO</div>
+            <div style={{fontWeight:700,color:T.ac,fontSize:"16px"}}>{stats.kmVolvoVac.toLocaleString("es-CL")}</div>
+          </div>
+          <div>
+            <div style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>LITROS</div>
+            <div style={{fontWeight:700,color:T.tx,fontSize:"16px"}}>{Math.round(stats.litrosVolvo).toLocaleString("es-CL")} L</div>
+          </div>
+          <div>
+            <div style={{color:T.txM,fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>COSTO</div>
+            <div style={{fontWeight:700,color:T.red,fontSize:"16px"}}>{fmtCLP(stats.costoVolvo)}</div>
+          </div>
+        </div>
+        <div style={{marginTop:"12px",paddingTop:"12px",borderTop:`1px solid ${T.bd}`,fontSize:"11px",color:T.txM}}>
+          Rend: <strong style={{color:T.ac}}>{rendVolvo} km/L</strong> · Costo/km: <strong style={{color:T.red}}>{fmtCLP(precioLitro/rendVolvo)}/km</strong>
         </div>
       </div>
     </div>
 
+    {/* Alerta de costo vacío */}
+    <div style={{background:pctVacioGlobal>25?`${T.red}0a`:`${T.ac}0a`,border:`1px solid ${pctVacioGlobal>25?T.red:T.ac}33`,borderLeft:`4px solid ${pctVacioGlobal>25?T.red:T.ac}`,borderRadius:"10px",padding:"14px 18px",marginBottom:"16px",fontSize:"12px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"10px"}}>
+        <div>
+          <div style={{fontWeight:700,color:pctVacioGlobal>25?T.red:T.ac,marginBottom:"3px",fontSize:"13px"}}>🔄 Costo por KM vacío / remonta</div>
+          <div style={{color:T.txM,fontSize:"11px"}}>
+            {stats.kmTotalVac.toLocaleString("es-CL")} km vacíos ({pctVacioGlobal.toFixed(1)}% del total)
+          </div>
+        </div>
+        <div style={{fontSize:"20px",fontWeight:700,color:pctVacioGlobal>25?T.red:T.ac}}>
+          {fmtCLP(costoVacioTotal)}
+        </div>
+      </div>
+    </div>
+
+    {/* Top 20 consumidores */}
     <div style={card}>
-      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"12px",color:T.tx}}>📋 KM Mensual por Sucursal (miles)</div>
-      <div style={{overflowX:"auto"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:"11px"}}>
+      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"4px",color:T.tx}}>🏆 Ranking de Consumo por Tracto</div>
+      <div style={{fontSize:"11px",color:T.txM,marginBottom:"12px"}}>
+        Top 20 tractos ordenados por costo de combustible estimado · Click columna para ordenar
+      </div>
+      <div style={{overflowX:"auto",maxHeight:"500px",overflowY:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
           <thead><tr>
-            <th style={thStyle}>Sucursal</th>
-            {monthlyStats.map(m => <th key={m.mes} style={{...thStyle,textAlign:"right"}}>{m.label}</th>)}
-            <th style={{...thStyle,textAlign:"right",color:T.ac}}>Total</th>
+            <th style={thStyle}>#</th>
+            <SortTh label="Tracto" col="pat" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="Marca" col="marca" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={thStyle}/>
+            <SortTh label="KM Com." col="kmCom" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...thStyle,textAlign:"right"}}/>
+            <SortTh label="KM Vac." col="kmVac" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...thStyle,textAlign:"right"}}/>
+            <SortTh label="% Vacío" col="pctVacio" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...thStyle,textAlign:"right"}}/>
+            <SortTh label="Litros" col="litros" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...thStyle,textAlign:"right"}}/>
+            <SortTh label="Costo Total" col="costo" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...thStyle,textAlign:"right"}}/>
+            <SortTh label="Costo Vacío" col="costoVacio" sortKey={sortKey} sortDir={sortDir} toggle={toggle} style={{...thStyle,textAlign:"right"}}/>
           </tr></thead>
-          <tbody>{sucAcum.map(([s], i) => {
-            let rowTotal = 0;
-            return (
-              <tr key={s} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
-                <td style={{...td,fontWeight:600}}><SucBadge s={s} T={T}/></td>
-                {monthlyStats.map(m => {
-                  const v = m.bySuc[s]?.km || 0;
-                  rowTotal += v;
-                  return <td key={m.mes} style={{...td,textAlign:"right"}}>{v > 0 ? Math.round(v / 1000).toLocaleString("es-CL") : "—"}</td>;
-                })}
-                <td style={{...td,textAlign:"right",fontWeight:700,color:T.ac}}>{Math.round(rowTotal / 1000).toLocaleString("es-CL")}</td>
-              </tr>
-            );
-          })}</tbody>
+          <tbody>{sorted.slice(0, 20).map((r, i) => (
+            <tr key={r.pat} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
+              <td style={td}>{i+1}</td>
+              <td style={{...td,fontWeight:700}}>{r.pat}</td>
+              <td style={td}><span style={{display:"inline-block",padding:"2px 8px",borderRadius:"4px",fontSize:"10px",fontWeight:600,background:r.marca==="SCANIA"?`${T.blu}22`:`${T.ac}22`,color:r.marca==="SCANIA"?T.blu:T.ac,border:`1px solid ${r.marca==="SCANIA"?T.blu:T.ac}44`}}>{r.marca}</span></td>
+              <td style={{...td,textAlign:"right",color:T.grn}}>{r.kmCom.toLocaleString("es-CL")}</td>
+              <td style={{...td,textAlign:"right",color:T.ac}}>{r.kmVac.toLocaleString("es-CL")}</td>
+              <td style={{...td,textAlign:"right",color:r.pctVacio>30?T.red:r.pctVacio>15?T.ac:T.grn,fontWeight:600}}>{r.pctVacio.toFixed(1)}%</td>
+              <td style={{...td,textAlign:"right"}}>{Math.round(r.litros).toLocaleString("es-CL")} L</td>
+              <td style={{...td,textAlign:"right",color:T.red,fontWeight:700}}>{fmtCLP(r.costo)}</td>
+              <td style={{...td,textAlign:"right",color:T.ac}}>{fmtCLP(r.costoVacio)}</td>
+            </tr>
+          ))}</tbody>
         </table>
       </div>
     </div>
   </div>);
 }
 
+// ═══════════════════════════════════════════════
 // ═══ MAIN APP ═══
-const VIEWS=[
+// ═══════════════════════════════════════════════
+
+const VIEWS = [
   {id:"buscar",label:"Buscador",icon:"🔍"},
   {id:"flota",label:"Estado Flota",icon:"📊"},
   {id:"inactivos",label:"Equipos",icon:"⚠️"},
+  {id:"eficiencia",label:"Eficiencia",icon:"⚖️"},
   {id:"clientes",label:"Por Cliente",icon:"🏢"},
   {id:"rutas",label:"Por Ruta",icon:"🛤️"},
   {id:"comparacion",label:"Comp. Mes",icon:"📅"},
   {id:"combustible",label:"Combustible",icon:"⛽"},
   {id:"detalle",label:"Detalle",icon:"📋"},
-  {id:"inventario",label:"Inventario",icon:"🏗️"}
+  {id:"inventario",label:"Inventario",icon:"🏗️"},
 ];
 
-export default function App(){
-  const[data,setData]=useState([]);const[flota,setFlota]=useState(new Map());const[ultimosMap,setUltimosMap]=useState(new Map());const[loading,setLoading]=useState(true);const[loadMsg,setLoadMsg]=useState("Conectando...");const[error,setError]=useState(null);const[view,setView]=useState("buscar");const[info,setInfo]=useState({});
-  const[darkMode,setDarkMode]=useState(()=>{
-    try{const s=localStorage.getItem("tb_dark");return s===null?true:s==="true";}catch{return true;}
+export default function App() {
+  const [view, setView] = useState("buscar");
+  const [data, setData] = useState([]);
+  const [flota, setFlota] = useState(new Map());
+  const [ultimosMap, setUltimosMap] = useState(new Map());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [lastLoad, setLastLoad] = useState(null);
+
+  // Tema: persiste en localStorage
+  const [dark, setDark] = useState(() => {
+    try {
+      const v = localStorage.getItem("dashops_dark");
+      if (v === "0") return false;
+      if (v === "1") return true;
+    } catch(e) {}
+    return true; // default dark
   });
-  const T=useMemo(()=>makeTheme(darkMode),[darkMode]);
-  const today=useMemo(()=>new Date(),[]);
+  useEffect(() => {
+    try { localStorage.setItem("dashops_dark", dark ? "1" : "0"); } catch(e) {}
+  }, [dark]);
 
-  const toggleTheme=()=>{
-    setDarkMode(d=>{const next=!d;try{localStorage.setItem("tb_dark",String(next));}catch{}return next;});
-  };
+  const T = useMemo(() => makeTheme(dark), [dark]);
+  const today = useMemo(() => new Date(), []);
 
-  const{tractoIdx,ramplaIdx}=useMemo(()=>{
-    const ti=new Map(),ri=new Map();
-    for(const row of data){
-      if(row.Tracto){if(!ti.has(row.Tracto))ti.set(row.Tracto,[]);ti.get(row.Tracto).push(row);}
-      if(row.Rampla){if(!ri.has(row.Rampla))ri.set(row.Rampla,[]);ri.get(row.Rampla).push(row);}
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Descargar los 3 CSV en paralelo con cache-busting
+      const bust = "&_=" + Date.now();
+      const [rV, rF, rU] = await Promise.all([
+        fetch(CSV_VIAJES + bust).then(r => r.text()),
+        fetch(CSV_FLOTA + bust).then(r => r.text()),
+        fetch(CSV_ULTIMOS + bust).then(r => r.text()),
+      ]);
+
+      // Viajes
+      const pV = Papa.parse(rV, {header: true, skipEmptyLines: true});
+      const rowsV = pV.data.map(r => ({
+        ...r,
+        Tracto: cleanPatente(r.Tracto),
+        Rampla: cleanPatente(r.Rampla),
+        _date: parseDate(r.Fecha),
+      })).filter(r => r._date);
+
+      // Flota
+      const pF = Papa.parse(rF, {header: true, skipEmptyLines: true});
+      const flotaMap = new Map();
+      pF.data.forEach(r => {
+        const pat = cleanPatente(r.Patente || r.patente);
+        if (!pat) return;
+        flotaMap.set(pat, {
+          marca: (r.Marca || r.marca || "").trim(),
+          modelo: (r.Modelo || r.modelo || "").trim(),
+          fecha: (r.Fecha || r.fecha || r.Año || r["Año"] || "").trim(),
+          tipoequipo: (r.TipoEquipo || r.Tipo || r.tipoequipo || r.tipo || "").trim(),
+        });
+      });
+
+      // Últimos despachos
+      const pU = Papa.parse(rU, {header: true, skipEmptyLines: true});
+      const ultMap = new Map();
+      pU.data.forEach(r => {
+        const pat = cleanPatente(r.Patente || r.patente || r.Tracto || r.Rampla);
+        const d = parseDate(r.Fecha || r.FechaMovimiento);
+        if (!pat || !d) return;
+        ultMap.set(pat, {
+          _date: d,
+          Origen: r.Origen || "",
+          Destino: r.Destino || "",
+          Cliente: r.Cliente || "",
+          tipoequipo: r.TipoEquipo || r.Tipo || "",
+        });
+      });
+
+      setData(rowsV);
+      setFlota(flotaMap);
+      setUltimosMap(ultMap);
+      setLastLoad(Date.now());
+    } catch(e) {
+      console.error(e);
+      setError("Error cargando datos: " + e.message);
+    } finally {
+      setLoading(false);
     }
-    return{tractoIdx:ti,ramplaIdx:ri};
-  },[data]);
+  }, []);
 
-  useEffect(()=>{
-    let vd=null,fd=null,ud=null;
-    let ultimosReady=false;
+  useEffect(() => { loadData(); }, [loadData]);
 
-    const tryFinalize=()=>{
-      if(!vd||!fd)return;
-      if(!ultimosReady){
-        setTimeout(tryFinalize, 500);
-        return;
+  // Índices por tracto/rampla
+  const {tractoIdx, ramplaIdx} = useMemo(() => {
+    const tIdx = new Map();
+    const rIdx = new Map();
+    for (const row of data) {
+      if (row.Tracto) {
+        if (!tIdx.has(row.Tracto)) tIdx.set(row.Tracto, []);
+        tIdx.get(row.Tracto).push(row);
       }
+      if (row.Rampla) {
+        if (!rIdx.has(row.Rampla)) rIdx.set(row.Rampla, []);
+        rIdx.get(row.Rampla).push(row);
+      }
+    }
+    // Ordenar desc por fecha
+    for (const arr of tIdx.values()) arr.sort((a, b) => b._date - a._date);
+    for (const arr of rIdx.values()) arr.sort((a, b) => b._date - a._date);
+    return {tractoIdx: tIdx, ramplaIdx: rIdx};
+  }, [data]);
 
-      setLoadMsg("Indexando...");
-      setTimeout(()=>{
-        try{
-          let rows=vd;
-          rows=rows.map(r=>({...r,_date:parseDate(r.Fecha)})).filter(r=>r._date);
-          rows.sort((a,b)=>b._date-a._date||(b.Expedicion||"").localeCompare(a.Expedicion||""));
-          const maxD=rows.length?rows[0]._date:null;const minD=rows.length?rows[rows.length-1]._date:null;
-          const fm=new Map();
-          fd.forEach(r=>{const pat=cleanPatente(r.patente);if(pat&&pat!=="AA1111"&&pat!=="AAA111")fm.set(pat,{marca:r.marca?.trim()||"",modelo:r.modelo?.trim()||"",fecha:r.fecha?.trim()||"",tipoequipo:r.tipoequipo?.trim()||""});});
+  const wrap = {maxWidth:"1400px",margin:"0 auto",padding:"16px"};
+  const navBtn = (v) => ({
+    display:"flex",alignItems:"center",gap:"6px",padding:"8px 14px",
+    borderRadius:"10px",border:"none",cursor:"pointer",
+    fontSize:"12px",fontWeight:600,fontFamily:"inherit",
+    background: view === v.id ? T.navActiveBg : T.navBg,
+    color: view === v.id ? T.navActiveText : T.tx,
+    transition:"all 0.15s",whiteSpace:"nowrap",
+    boxShadow: view === v.id ? `0 2px 6px ${T.ac}44` : "none",
+  });
 
-          const um=new Map();
-          if(ud&&ud.length){
-            ud.forEach(r=>{
-              const pat=cleanPatente(r["Patente"]||r["patente"]);
-              if(!pat)return;
-              const rawDate=r["Ult. despacho"]||r["ult_despacho"]||r["Fecha"];
-              let d=null;
-              if(rawDate){
-                const iso=String(rawDate).match(/(\d{4})-(\d{2})-(\d{2})/);
-                if(iso)d=new Date(+iso[1],+iso[2]-1,+iso[3]);
-                else d=parseDate(rawDate);
-              }
-              if(!d)return;
-              const existing=um.get(pat);
-              if(!existing||d>existing._date){
-                um.set(pat,{_date:d,Origen:r["Origen"]||"",Destino:r["Destino"]||"",Cliente:r["Cliente"]||"",tipoequipo:r["Tipo equipo"]||""});
-              }
-            });
-          }
+  if (loading && data.length === 0) {
+    return (
+      <div style={{minHeight:"100vh",background:T.bg,color:T.tx,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:"40px",marginBottom:"14px",animation:"spin 1.5s linear infinite",display:"inline-block"}}>🔄</div>
+          <div style={{fontSize:"16px",fontWeight:600}}>Cargando datos...</div>
+          <div style={{fontSize:"12px",color:T.txM,marginTop:"6px"}}>Viajes, flota y últimos despachos</div>
+        </div>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
-          const rowsConSolicitud = rows.filter(r=>r.Cliente!==SIN_SOLICITUD);
-          setInfo({
-            total:rows.length,
-            minDate:minD?formatDate(minD):"-",
-            maxDate:maxD?formatDate(maxD):"-",
-            tractos:new Set(rows.map(r=>r.Tracto).filter(Boolean)).size,
-            ramplas:new Set(rows.map(r=>r.Rampla).filter(Boolean)).size,
-            clientes:new Set(rowsConSolicitud.map(r=>r.Cliente).filter(Boolean)).size,
-            flotaTotal:fm.size,
-            ultimosTotal:um.size
-          });
-          setData(rows);setFlota(fm);setUltimosMap(um);setLoading(false);
-        }catch(e){setError("Error: "+e.message);setLoading(false);}
-      },100);
-    };
-
-    const ultimosTimeout = setTimeout(()=>{
-      if(!ultimosReady){ ultimosReady=true; ud=ud||[]; tryFinalize(); }
-    }, 4000);
-
-    setLoadMsg("Descargando viajes...");
-    Papa.parse(CSV_VIAJES,{download:true,header:true,skipEmptyLines:true,complete:(r)=>{vd=r.data;setLoadMsg("Descargando flota...");tryFinalize();},error:(e)=>{setError("Error viajes: "+e.message);setLoading(false);}});
-    Papa.parse(CSV_FLOTA,{download:true,header:true,skipEmptyLines:true,complete:(r)=>{fd=r.data;tryFinalize();},error:(e)=>{setError("Error flota: "+e.message);setLoading(false);}});
-    Papa.parse(CSV_ULTIMOS,{download:true,header:true,skipEmptyLines:true,
-      complete:(r)=>{ud=r.data;ultimosReady=true;clearTimeout(ultimosTimeout);tryFinalize();},
-      error:()=>{ud=[];ultimosReady=true;clearTimeout(ultimosTimeout);tryFinalize();}
-    });
-  },[]);
-
-  const spinStyle=`@keyframes spin{to{transform:rotate(360deg)}}`;
-
-  if(loading)return(<div style={{minHeight:"100vh",background:darkMode?"#0a0c10":"#f0f4f8",display:"flex",alignItems:"center",justifyContent:"center"}}>
-    <div style={{textAlign:"center"}}>
-      <div style={{width:"48px",height:"48px",border:`3px solid ${darkMode?"#252a36":"#e2e8f0"}`,borderTopColor:"#f59e0b",borderRadius:"50%",animation:"spin 1s linear infinite",margin:"0 auto 16px"}}/>
-      <div style={{fontSize:"16px",fontWeight:600,marginBottom:"8px",color:darkMode?"#e0e4ec":"#0f172a"}}>Cargando Dashboard Operaciones</div>
-      <div style={{fontSize:"12px",color:darkMode?"#6b7280":"#64748b"}}>{loadMsg}</div>
-      <style>{spinStyle}</style>
-    </div>
-  </div>);
-
-  if(error)return(<div style={{minHeight:"100vh",background:darkMode?"#0a0c10":"#f0f4f8",display:"flex",alignItems:"center",justifyContent:"center"}}>
-    <div style={{background:darkMode?"#12151c":"#fff",border:`1px solid #ef444444`,borderRadius:"12px",padding:"32px",maxWidth:"500px",textAlign:"center"}}>
-      <div style={{fontSize:"32px",marginBottom:"12px"}}>❌</div>
-      <div style={{fontSize:"14px",fontWeight:600,marginBottom:"8px",color:darkMode?"#e0e4ec":"#0f172a"}}>Error de Carga</div>
-      <div style={{fontSize:"12px",color:darkMode?"#6b7280":"#64748b"}}>{error}</div>
-    </div>
-  </div>);
-
-  return(<div style={{minHeight:"100vh",background:T.bg,color:T.tx,fontFamily:"'JetBrains Mono','Fira Code',monospace",fontSize:"13px",transition:"background 0.2s,color 0.2s"}}>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
-    <header style={{background:T.sf,borderBottom:`1px solid ${T.bd}`,padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,boxShadow:T.headerShadow,gap:"12px",flexWrap:"wrap"}}>
-      <div style={{display:"flex",alignItems:"center",gap:"12px"}}>
-        <div style={{width:"36px",height:"36px",background:"linear-gradient(135deg,#f59e0b,#f97316)",borderRadius:"8px",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:"16px",color:"#000",flexShrink:0}}>TB</div>
-        <div>
-          <div style={{fontSize:"17px",fontWeight:700,letterSpacing:"-0.5px",color:T.tx}}>Dashboard Operaciones</div>
-          <div style={{fontSize:"10px",color:T.txM,letterSpacing:"2px",textTransform:"uppercase"}}>Transportes Bello</div>
+  if (error) {
+    return (
+      <div style={{minHeight:"100vh",background:T.bg,color:T.tx,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"}}>
+        <div style={{textAlign:"center",background:T.sf,border:`1px solid ${T.red}44`,borderRadius:"12px",padding:"24px",maxWidth:"480px"}}>
+          <div style={{fontSize:"36px",marginBottom:"10px"}}>⚠️</div>
+          <div style={{fontSize:"16px",fontWeight:600,color:T.red,marginBottom:"8px"}}>Error cargando datos</div>
+          <div style={{fontSize:"13px",color:T.txM,marginBottom:"16px"}}>{error}</div>
+          <button onClick={loadData} style={{padding:"10px 20px",borderRadius:"8px",border:"none",background:T.ac,color:"#000",fontWeight:700,cursor:"pointer",fontSize:"13px"}}>Reintentar</button>
         </div>
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
-        <ThemeToggle dark={darkMode} onToggle={toggleTheme}/>
+    );
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:T.bg,color:T.tx,fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"}}>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        * { box-sizing: border-box; }
+        input, select, button { font-family: inherit; }
+      `}</style>
+
+      {/* HEADER */}
+      <div style={{background:T.sf,borderBottom:`1px solid ${T.bd}`,boxShadow:T.headerShadow,position:"sticky",top:0,zIndex:10}}>
+        <div style={{...wrap,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",flexWrap:"wrap",gap:"8px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+            <div style={{width:"32px",height:"32px",background:`linear-gradient(135deg,${T.ac},#f97316)`,borderRadius:"7px",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:"14px",color:"#000"}}>TB</div>
+            <div>
+              <div style={{fontSize:"14px",fontWeight:700,color:T.tx}}>Dashboard Operaciones</div>
+              <div style={{fontSize:"10px",color:T.txM,textTransform:"uppercase",letterSpacing:"1px"}}>Transportes Bello e Hijos Ltda.</div>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap"}}>
+            <RefreshButton onRefresh={loadData} loading={loading} lastLoad={lastLoad} T={T}/>
+            <ThemeToggle dark={dark} onToggle={() => setDark(d => !d)}/>
+          </div>
+        </div>
+
+        {/* NAV */}
+        <div style={{...wrap,padding:"0 16px 12px",display:"flex",gap:"4px",overflowX:"auto",flexWrap:"wrap"}}>
+          {VIEWS.map(v => (
+            <button key={v.id} onClick={() => setView(v.id)} style={navBtn(v)}>
+              <span style={{fontSize:"13px"}}>{v.icon}</span>
+              <span>{v.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
-    </header>
-    <div style={{background:T.isDark?"#0d1017":T.sf2,borderBottom:`1px solid ${T.bd}`,padding:"6px 24px",fontSize:"10px",color:T.txM,display:"flex",gap:"16px",flexWrap:"wrap",justifyContent:"space-between"}}>
-      <span>{info.total?.toLocaleString("es-CL")} tramos · {info.tractos} tractos · {info.ramplas} ramplas · {info.clientes} clientes · Flota: {info.flotaTotal} equipos{info.ultimosTotal?" · Últimos viajes: "+info.ultimosTotal+" equipos":""}</span>
-      <span>{info.minDate} → {info.maxDate}</span>
+
+      {/* CONTENT */}
+      <div style={wrap}>
+        {view === "buscar" && <Buscador tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} today={today} T={T}/>}
+        {view === "flota" && <EstadoFlota data={data} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
+        {view === "inactivos" && <Inactivos tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
+        {view === "eficiencia" && <EficienciaTracto data={data} flota={flota} today={today} T={T}/>}
+        {view === "clientes" && <StatsCliente data={data} today={today} T={T}/>}
+        {view === "rutas" && <StatsRuta data={data} today={today} T={T}/>}
+        {view === "comparacion" && <ComparacionMes data={data} today={today} T={T}/>}
+        {view === "combustible" && <Combustible data={data} flota={flota} today={today} T={T}/>}
+        {view === "detalle" && <Detalle data={data} T={T}/>}
+        {view === "inventario" && <Inventario flota={flota} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} ultimosMap={ultimosMap} today={today} T={T}/>}
+      </div>
+
+      {/* FOOTER */}
+      <div style={{...wrap,padding:"24px 16px 12px",textAlign:"center",fontSize:"10px",color:T.txM,borderTop:`1px solid ${T.bd}`,marginTop:"24px"}}>
+        Transportes Bello e Hijos Ltda. · Dashboard Operaciones · {data.length.toLocaleString("es-CL")} tramos · {flota.size} equipos en catálogo
+      </div>
     </div>
-    <div style={{background:T.sf,borderBottom:`1px solid ${T.bd}`,padding:"8px 24px",overflowX:"auto"}}>
-      <nav style={{display:"flex",gap:"2px",background:T.navBg,borderRadius:"10px",padding:"3px",width:"fit-content"}}>
-        {VIEWS.map(v=>(
-          <button key={v.id} onClick={()=>setView(v.id)} style={{padding:"9px 15px",borderRadius:"8px",border:"none",cursor:"pointer",fontSize:"12px",fontWeight:view===v.id?700:500,fontFamily:"inherit",background:view===v.id?T.navActiveBg:"transparent",color:view===v.id?T.navActiveText:T.txM,transition:"all 0.15s",whiteSpace:"nowrap",boxShadow:view===v.id?(T.isDark?"0 1px 3px rgba(0,0,0,0.3)":"0 1px 3px rgba(0,0,0,0.12)"):"none"}}>
-            {v.icon} {v.label}
-          </button>
-        ))}
-      </nav>
-    </div>
-    <main style={{maxWidth:"1400px",margin:"0 auto",padding:"24px"}}>
-      {view==="buscar"&&<Buscador tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} today={today} T={T}/>}
-      {view==="flota"&&<EstadoFlota data={data} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
-      {view==="inactivos"&&<Inactivos tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
-      {view==="clientes"&&<StatsCliente data={data} today={today} T={T}/>}
-      {view==="rutas"&&<StatsRuta data={data} today={today} T={T}/>}
-      {view==="comparacion"&&<ComparacionMes data={data} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} today={today} T={T}/>}
-      {view==="combustible"&&<Combustible data={data} flota={flota} tractoIdx={tractoIdx} today={today} T={T}/>}
-      {view==="detalle"&&<Detalle data={data} T={T}/>}
-      {view==="inventario"&&<Inventario flota={flota} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} ultimosMap={ultimosMap} today={today} T={T}/>}
-    </main>
-  </div>);
+  );
 }
