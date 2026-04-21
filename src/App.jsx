@@ -2658,12 +2658,13 @@ function Combustible({data, flota, today, T}) {
           </div>
           <div style={{overflowX:"auto",maxHeight:"450px",overflowY:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}>
-              <thead><tr>
+             <thead><tr>
                 <th style={thStyle}>#</th>
                 <SortTh label="Tracto" col="pat" sortKey={rkSortKey} sortDir={rkSortDir} toggle={rkToggle} style={thStyle}/>
                 <SortTh label="Marca" col="marca" sortKey={rkSortKey} sortDir={rkSortDir} toggle={rkToggle} style={thStyle}/>
                 <SortTh label="KM Com." col="kmCom" sortKey={rkSortKey} sortDir={rkSortDir} toggle={rkToggle} style={{...thStyle,textAlign:"right"}}/>
                 <SortTh label="KM Vac." col="kmVac" sortKey={rkSortKey} sortDir={rkSortDir} toggle={rkToggle} style={{...thStyle,textAlign:"right"}}/>
+                <SortTh label="KM Total" col="kmTotal" sortKey={rkSortKey} sortDir={rkSortDir} toggle={rkToggle} style={{...thStyle,textAlign:"right"}}/>
                 <SortTh label="% Vacío" col="pctVacio" sortKey={rkSortKey} sortDir={rkSortDir} toggle={rkToggle} style={{...thStyle,textAlign:"right"}}/>
                 <SortTh label="Litros" col="litros" sortKey={rkSortKey} sortDir={rkSortDir} toggle={rkToggle} style={{...thStyle,textAlign:"right"}}/>
                 <SortTh label="Costo" col="costo" sortKey={rkSortKey} sortDir={rkSortDir} toggle={rkToggle} style={{...thStyle,textAlign:"right"}}/>
@@ -2682,6 +2683,7 @@ function Combustible({data, flota, today, T}) {
                   </td>
                   <td style={{...td,textAlign:"right",color:T.grn}}>{fmtKm(r.kmCom)}</td>
                   <td style={{...td,textAlign:"right",color:T.ac}}>{fmtKm(r.kmVac)}</td>
+                  <td style={{...td,textAlign:"right",fontWeight:700}}>{fmtKm(r.kmTotal)}</td>
                   <td style={{...td,textAlign:"right",color:r.pctVacio>30?T.red:r.pctVacio>15?T.ac:T.grn,fontWeight:600}}>{r.pctVacio.toFixed(1)}%</td>
                   <td style={{...td,textAlign:"right"}}>{Math.round(r.litros).toLocaleString("es-CL")} L</td>
                   <td style={{...td,textAlign:"right",color:T.red,fontWeight:700}}>{fmtCLP(r.costo)}</td>
