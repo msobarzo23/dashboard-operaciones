@@ -72,7 +72,39 @@ function formatDate(d){if(!d)return "-";return String(d.getDate()).padStart(2,"0
 function formatDateTime(d){if(!d)return "-";return formatDate(d)+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0");}
 function daysBetween(d1,d2){return Math.floor((d2-d1)/86400000);}
 function dayKey(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
-
+// ── Deduplicación de tramos físicos ──
+// Un tramo físico único = Expedicion + Fecha + Tracto + Rampla + Origen + Destino + Kilometro
+// Cuando hay expedición multi-cliente (mismo tramo vendido a varios clientes), el CSV
+// genera una fila por cliente. Para vistas operacionales (KM reales, combustible,
+// utilización) debemos contar una sola vez. Para vistas comerciales (Por Cliente,
+// Por Ruta) conservamos todas las filas.
+function dedupeFisico(rows) {
+  const seen = new Map();
+  for (const r of rows) {
+    const key = [
+      r.Expedicion || "",
+      r.Fecha || "",
+      r.Tracto || "",
+      r.Rampla || "",
+      r.Origen || "",
+      r.Destino || "",
+      r.Kilometro || "",
+    ].join("|");
+    if (!seen.has(key)) {
+      seen.set(key, { ...r, _multiCliente: false, _clientesAdicionales: [] });
+    } else {
+      const existing = seen.get(key);
+      existing._multiCliente = true;
+      existing._clientesAdicionales.push({
+        Cliente: r.Cliente,
+        Solicitud: r.Solicitud,
+        Carga: r.Carga,
+        Guia: r.Guia,
+      });
+    }
+  }
+  return [...seen.values()];
+}
 function getEstadoEquipo(daysInactive) {
   if (daysInactive === null || daysInactive === undefined) return "SIN VIAJES";
   if (daysInactive <= 30) return "ACTIVO";
@@ -2858,11 +2890,15 @@ export default function App() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Índices por tracto/rampla
+  // Dataset físico: deduplica tramos multi-cliente (para Combustible, Eficiencia, Flota)
+  // Dataset comercial (data): conserva todas las filas (para Por Cliente, Por Ruta)
+  const dataFisica = useMemo(() => dedupeFisico(data), [data]);
+
+  // Índices por tracto/rampla — usan dataFisica para que el Buscador muestre tramos reales
   const {tractoIdx, ramplaIdx} = useMemo(() => {
     const tIdx = new Map();
     const rIdx = new Map();
-    for (const row of data) {
+    for (const row of dataFisica) {
       if (row.Tracto) {
         if (!tIdx.has(row.Tracto)) tIdx.set(row.Tracto, []);
         tIdx.get(row.Tracto).push(row);
@@ -2876,8 +2912,7 @@ export default function App() {
     for (const arr of tIdx.values()) arr.sort((a, b) => b._date - a._date);
     for (const arr of rIdx.values()) arr.sort((a, b) => b._date - a._date);
     return {tractoIdx: tIdx, ramplaIdx: rIdx};
-  }, [data]);
-
+  }, [dataFisica]);
   const wrap = {maxWidth:"1400px",margin:"0 auto",padding:"16px"};
   const navBtn = (v) => ({
     display:"flex",alignItems:"center",gap:"6px",padding:"8px 14px",
@@ -2951,16 +2986,16 @@ export default function App() {
       </div>
 
       {/* CONTENT */}
-      <div style={wrap}>
+     <div style={wrap}>
         {view === "buscar" && <Buscador tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} today={today} T={T}/>}
-        {view === "flota" && <EstadoFlota data={data} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
+        {view === "flota" && <EstadoFlota data={dataFisica} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
         {view === "inactivos" && <Inactivos tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} flota={flota} ultimosMap={ultimosMap} today={today} T={T}/>}
-        {view === "eficiencia" && <EficienciaTracto data={data} flota={flota} today={today} T={T}/>}
+        {view === "eficiencia" && <EficienciaTracto data={dataFisica} flota={flota} today={today} T={T}/>}
         {view === "clientes" && <StatsCliente data={data} today={today} T={T}/>}
         {view === "rutas" && <StatsRuta data={data} today={today} T={T}/>}
-        {view === "comparacion" && <ComparacionMes data={data} today={today} T={T}/>}
-        {view === "combustible" && <Combustible data={data} flota={flota} today={today} T={T}/>}
-        {view === "detalle" && <Detalle data={data} T={T}/>}
+        {view === "comparacion" && <ComparacionMes data={dataFisica} today={today} T={T}/>}
+        {view === "combustible" && <Combustible data={dataFisica} flota={flota} today={today} T={T}/>}
+        {view === "detalle" && <Detalle data={dataFisica} T={T}/>}
         {view === "inventario" && <Inventario flota={flota} tractoIdx={tractoIdx} ramplaIdx={ramplaIdx} ultimosMap={ultimosMap} today={today} T={T}/>}
       </div>
 
