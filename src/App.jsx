@@ -898,7 +898,7 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       const days=lastDate?daysBetween(lastDate,today):null;
       const estado=getEstadoEquipo(days);
       const esSinSol = lastRecord?.Cliente === SIN_SOLICITUD;
-      enCatalogoArr.push({pat,days,lastRecord,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS",fi,estado,enCatalogo:true,"lastRecord.Fecha":lastRecord?.Fecha||"","fi.tipoequipo":fi.tipoequipo||"",esSinSol});
+      enCatalogoArr.push({pat,days,lastRecord,suc:lastRecord?getSucursal(lastRecord.Destino):"OTROS",fi,estado,enCatalogo:true,"lastRecord.Fecha":lastRecord?._date||null,"fi.tipoequipo":fi.tipoequipo||"",esSinSol});
     }
     for(const[pat,tr] of idx.entries()){
       if(flota.has(pat)) continue;
@@ -907,7 +907,7 @@ function Inactivos({tractoIdx,ramplaIdx,flota,ultimosMap,today,T}){
       const last=tr[0];
       const estado=getEstadoEquipo(days);
       const esSinSol = last.Cliente === SIN_SOLICITUD;
-      fueraCatalogoArr.push({pat,days,lastRecord:last,suc:getSucursal(last.Destino),fi:null,estado,enCatalogo:false,"lastRecord.Fecha":last.Fecha||"","fi.tipoequipo":"",esSinSol});
+      fueraCatalogoArr.push({pat,days,lastRecord:last,suc:getSucursal(last.Destino),fi:null,estado,enCatalogo:false,"lastRecord.Fecha":last._date||null,"fi.tipoequipo":"",esSinSol});
     }
     return {
       todosEquipos: soloDoc ? enCatalogoArr : [...enCatalogoArr, ...fueraCatalogoArr],
@@ -2810,6 +2810,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastLoad, setLastLoad] = useState(null);
+  const [parseWarnings, setParseWarnings] = useState([]);
 
   // Tema: persiste en localStorage
   const [dark, setDark] = useState(() => {
@@ -2830,6 +2831,7 @@ export default function App() {
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setParseWarnings([]);
     try {
       // Descargar los 3 CSV en paralelo con cache-busting
       const bust = "&_=" + Date.now();
@@ -2839,21 +2841,39 @@ export default function App() {
         fetch(CSV_ULTIMOS + bust).then(r => r.text()),
       ]);
 
+      const warnings = [];
+
       // Viajes
       const pV = Papa.parse(rV, {header: true, skipEmptyLines: true});
+      if (pV.errors.length > 0) {
+        warnings.push(`CSV Viajes: ${pV.errors.length} error(es) de formato detectado(s). Primero: "${pV.errors[0].message}" (fila ${pV.errors[0].row}).`);
+      }
+      const totalViajes = pV.data.length;
       const rowsV = pV.data.map(r => ({
         ...r,
         Tracto: cleanPatente(r.Tracto),
         Rampla: cleanPatente(r.Rampla),
         _date: parseDate(r.Fecha),
       })).filter(r => r._date);
+      const saltadosViajes = totalViajes - rowsV.length;
+      if (saltadosViajes > 0) {
+        warnings.push(`Se ignoraron ${saltadosViajes} fila(s) de viajes por tener fecha inválida o vacía.`);
+      }
+      const sinTracto = rowsV.filter(r => !r.Tracto).length;
+      if (sinTracto > 0) {
+        warnings.push(`${sinTracto} viaje(s) sin patente de tracto.`);
+      }
 
       // Flota
       const pF = Papa.parse(rF, {header: true, skipEmptyLines: true});
+      if (pF.errors.length > 0) {
+        warnings.push(`CSV Flota: ${pF.errors.length} error(es) de formato detectado(s).`);
+      }
       const flotaMap = new Map();
+      let sinPatenteFlota = 0;
       pF.data.forEach(r => {
         const pat = cleanPatente(r.Patente || r.patente);
-        if (!pat) return;
+        if (!pat) { sinPatenteFlota++; return; }
         flotaMap.set(pat, {
           marca: (r.Marca || r.marca || "").trim(),
           modelo: (r.Modelo || r.modelo || "").trim(),
@@ -2861,9 +2881,15 @@ export default function App() {
           tipoequipo: (r.TipoEquipo || r.Tipo || r.tipoequipo || r.tipo || "").trim(),
         });
       });
+      if (sinPatenteFlota > 0) {
+        warnings.push(`${sinPatenteFlota} equipo(s) en flota ignorado(s) por no tener patente.`);
+      }
 
       // Últimos despachos
       const pU = Papa.parse(rU, {header: true, skipEmptyLines: true});
+      if (pU.errors.length > 0) {
+        warnings.push(`CSV Últimos despachos: ${pU.errors.length} error(es) de formato detectado(s).`);
+      }
       const ultMap = new Map();
       pU.data.forEach(r => {
         const pat = cleanPatente(r.Patente || r.patente || r.Tracto || r.Rampla);
@@ -2882,6 +2908,7 @@ export default function App() {
       setFlota(flotaMap);
       setUltimosMap(ultMap);
       setLastLoad(Date.now());
+      if (warnings.length > 0) setParseWarnings(warnings);
     } catch(e) {
       console.error(e);
       setError("Error cargando datos: " + e.message);
@@ -2986,6 +3013,25 @@ export default function App() {
           ))}
         </div>
       </div>
+
+      {/* ADVERTENCIAS DE DATOS */}
+      {parseWarnings.length > 0 && (
+        <div style={{...wrap, paddingTop:"12px", paddingBottom:"0"}}>
+          <div style={{background: T.isDark ? "#2a1f0e" : "#fef3c7", border:`1px solid ${T.ac}66`, borderRadius:"10px", padding:"12px 16px"}}>
+            <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"8px"}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:"12px", fontWeight:700, color:T.ac, marginBottom:"6px"}}>⚠️ Advertencias al cargar datos ({parseWarnings.length})</div>
+                <ul style={{margin:0, paddingLeft:"16px", listStyle:"disc"}}>
+                  {parseWarnings.map((w, i) => (
+                    <li key={i} style={{fontSize:"11px", color:T.isDark?"#d97706":"#92400e", marginBottom:"2px"}}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+              <button onClick={() => setParseWarnings([])} style={{background:"none", border:"none", cursor:"pointer", color:T.ac, fontSize:"16px", lineHeight:1, padding:"0 4px", flexShrink:0}} title="Cerrar">×</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CONTENT */}
      <div style={wrap}>
