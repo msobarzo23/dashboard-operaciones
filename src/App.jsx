@@ -12,7 +12,7 @@ function isVacioTrip(row) {
   if (!row) return false;
   if (row.Cliente === SIN_SOLICITUD) return true;
   if (!row.Cliente || row.Cliente.trim() === "") return true;
-  const carga = (row.Carga || "").toUpperCase().trim();
+  const carga = (row.Carga || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
   if (carga === "VACIO" || carga.startsWith("VACIO ") || carga.startsWith("VACIO(")) return true;
   return false;
 }
@@ -1508,9 +1508,9 @@ function Detalle({data,T}){
   const cgs=useMemo(()=>[...new Set(dataFiltrada.map(d=>d.Carga?.trim()).filter(c=>c&&!/^\d+$/.test(c)))].sort(),[dataFiltrada]);
 
   const filtered=useMemo(()=>{
-    const dateFrom = fd ? new Date(fd) : null;
+    const dateFrom = fd ? new Date(fd + "T00:00:00") : null;
     let dateTo = null;
-    if (fh) { dateTo = new Date(fh); dateTo.setDate(dateTo.getDate() + 1); }
+    if (fh) { dateTo = new Date(fh + "T00:00:00"); dateTo.setDate(dateTo.getDate() + 1); }
     const trUp = tr ? tr.toUpperCase() : null;
     const raUp = ra ? ra.toUpperCase() : null;
     const orUp = or ? or.toUpperCase() : null;
@@ -1570,7 +1570,12 @@ function Detalle({data,T}){
           <tbody>{pd.map((d,i)=>(
             <tr key={d.Expedicion+"-"+i} style={{background:i%2?(T.isDark?"#1a1e28":"#f8fafc"):"transparent"}}>
               <td style={td}>{d.Fecha}</td><td style={td}>{d.Solicitud}</td>
-              <td style={{...td,maxWidth:"200px",overflow:"hidden",textOverflow:"ellipsis"}}>{d.Cliente}</td>
+              <td style={{...td,maxWidth:"220px"}}>
+                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"inline-block",maxWidth:d._multiCliente?"160px":"100%",verticalAlign:"middle"}}>{d.Cliente}</span>
+                {d._multiCliente && (
+                  <span title={["+ clientes adicionales:", ...d._clientesAdicionales.map(c=>c.Cliente)].join("\n")} style={{marginLeft:"5px",display:"inline-block",verticalAlign:"middle",padding:"1px 5px",borderRadius:"4px",fontSize:"10px",fontWeight:700,background:"rgba(59,130,246,0.15)",color:"#3b82f6",border:"1px solid rgba(59,130,246,0.3)",cursor:"help",whiteSpace:"nowrap"}}>+{d._clientesAdicionales.length}</span>
+                )}
+              </td>
               <td style={{...td,fontWeight:600}}>{d.Tracto}</td><td style={{...td,fontWeight:600}}>{d.Rampla}</td>
               <td style={td}>{d.Origen}</td><td style={td}>{d.Destino}</td>
               <td style={td}>{Number(d.Kilometro||0).toLocaleString("es-CL")}</td>
