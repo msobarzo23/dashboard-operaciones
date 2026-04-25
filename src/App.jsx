@@ -9,6 +9,7 @@ import EficienciaTracto from "./views/EficienciaTracto.jsx";
 import StatsCliente from "./views/StatsCliente.jsx";
 import StatsRuta from "./views/StatsRuta.jsx";
 import ComparacionMes from "./views/ComparacionMes.jsx";
+import PulsoMensual from "./views/PulsoMensual.jsx";
 import Combustible from "./views/Combustible.jsx";
 import Detalle from "./views/Detalle.jsx";
 import Inventario from "./views/Inventario.jsx";
@@ -20,6 +21,7 @@ const VIEWS = [
   {id:"eficiencia",label:"Eficiencia",icon:"⚖️"},
   {id:"clientes",label:"Por Cliente",icon:"🏢"},
   {id:"rutas",label:"Por Ruta",icon:"🛤️"},
+  {id:"pulso",label:"Pulso Mes",icon:"📈"},
   {id:"comparacion",label:"Comp. Mes",icon:"📅"},
   {id:"combustible",label:"Combustible",icon:"⛽"},
   {id:"detalle",label:"Detalle",icon:"📋"},
@@ -253,6 +255,7 @@ export default function App() {
         {view === "eficiencia" && <EficienciaTracto data={dataFisica} flota={flota} today={today} T={T}/>}
         {view === "clientes" && <StatsCliente data={data} today={today} T={T}/>}
         {view === "rutas" && <StatsRuta data={data} today={today} T={T}/>}
+        {view === "pulso" && <PulsoMensual data={dataFisica} today={today} T={T}/>}
         {view === "comparacion" && <ComparacionMes data={dataFisica} today={today} T={T}/>}
         {view === "combustible" && <Combustible data={dataFisica} flota={flota} today={today} T={T}/>}
         {view === "detalle" && <Detalle data={dataFisica} T={T}/>}
