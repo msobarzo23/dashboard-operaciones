@@ -1,5 +1,109 @@
 import { useState, useMemo, useCallback } from "react";
-import { formatDateTime } from "../utils.js";
+import { formatDateTime, getMonthKey, monthKeyToLabel } from "../utils.js";
+
+export function usePeriodo(data, storageKey) {
+  const availableMonths = useMemo(() => {
+    const set = new Set();
+    for (const r of data) {
+      const mk = getMonthKey(r._date);
+      if (mk) set.add(mk);
+    }
+    return [...set].sort().reverse();
+  }, [data]);
+
+  const [modo, setModo] = useState(() => {
+    try { return localStorage.getItem(storageKey + "_modo") || "mes"; } catch(e) { return "mes"; }
+  });
+  const [mes, setMes] = useState(() => {
+    try { return localStorage.getItem(storageKey + "_mes") || ""; } catch(e) { return ""; }
+  });
+  const [rolling, setRolling] = useState(() => {
+    try { const v = parseInt(localStorage.getItem(storageKey + "_rolling")); return isFinite(v) && v > 0 ? v : 3; } catch(e) { return 3; }
+  });
+
+  const mesEfectivo = useMemo(() => {
+    if (availableMonths.length === 0) return "";
+    if (mes && availableMonths.includes(mes)) return mes;
+    return availableMonths[0];
+  }, [availableMonths, mes]);
+
+  const setModoPersist = useCallback((m) => {
+    setModo(m);
+    try { localStorage.setItem(storageKey + "_modo", m); } catch(e) {}
+  }, [storageKey]);
+  const setMesPersist = useCallback((m) => {
+    setMes(m);
+    try { localStorage.setItem(storageKey + "_mes", m); } catch(e) {}
+  }, [storageKey]);
+  const setRollingPersist = useCallback((v) => {
+    setRolling(v);
+    try { localStorage.setItem(storageKey + "_rolling", String(v)); } catch(e) {}
+  }, [storageKey]);
+
+  const filterRow = useCallback((row, today) => {
+    if (!row._date) return false;
+    if (modo === "todo") return true;
+    if (modo === "mes") {
+      return getMonthKey(row._date) === mesEfectivo;
+    }
+    if (modo === "rolling") {
+      const cutoff = new Date(today);
+      cutoff.setMonth(cutoff.getMonth() - rolling);
+      return row._date >= cutoff;
+    }
+    return true;
+  }, [modo, mesEfectivo, rolling]);
+
+  const labelActual = useMemo(() => {
+    if (modo === "todo") return "Histórico completo";
+    if (modo === "mes") return monthKeyToLabel(mesEfectivo);
+    return `Últimos ${rolling} ${rolling === 1 ? "mes" : "meses"}`;
+  }, [modo, mesEfectivo, rolling]);
+
+  return {
+    modo, setModo: setModoPersist,
+    mes: mesEfectivo, setMes: setMesPersist,
+    rolling, setRolling: setRollingPersist,
+    availableMonths,
+    filterRow,
+    labelActual,
+  };
+}
+
+export function PeriodoSelector({ periodo, T, compact = false }) {
+  const sel = {background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
+  const tabBtn = (active) => ({
+    padding:"6px 12px",borderRadius:"6px",border:"none",cursor:"pointer",
+    fontSize:"11px",fontWeight:600,fontFamily:"inherit",
+    background: active ? T.ac : "transparent",
+    color: active ? "#000" : T.txM,
+    transition:"all 0.15s",whiteSpace:"nowrap",
+  });
+  return (
+    <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap"}}>
+      <div style={{display:"flex",background:T.sf2,borderRadius:"8px",padding:"3px",border:`1px solid ${T.bd}`}}>
+        <button onClick={() => periodo.setModo("mes")} style={tabBtn(periodo.modo === "mes")} title="Comparar mes calendario específico (ej: abril 2026)">📅 Mes</button>
+        <button onClick={() => periodo.setModo("rolling")} style={tabBtn(periodo.modo === "rolling")} title="Ventana móvil de los últimos N meses">🔄 Móvil</button>
+        <button onClick={() => periodo.setModo("todo")} style={tabBtn(periodo.modo === "todo")} title="Todos los datos disponibles">∞ Todo</button>
+      </div>
+      {periodo.modo === "mes" && (
+        <select value={periodo.mes} onChange={e => periodo.setMes(e.target.value)} style={sel}>
+          {periodo.availableMonths.length === 0 && <option value="">Sin datos</option>}
+          {periodo.availableMonths.map(m => <option key={m} value={m}>{monthKeyToLabel(m)}</option>)}
+        </select>
+      )}
+      {periodo.modo === "rolling" && (
+        <select value={periodo.rolling} onChange={e => periodo.setRolling(+e.target.value)} style={sel}>
+          <option value={1}>1 mes</option>
+          <option value={2}>2 meses</option>
+          <option value={3}>3 meses</option>
+          <option value={6}>6 meses</option>
+          <option value={12}>12 meses</option>
+        </select>
+      )}
+    </div>
+  );
+}
 
 export function useSortable(data, defaultKey, defaultDir = "asc") {
   const [sortKey, setSortKey] = useState(defaultKey);

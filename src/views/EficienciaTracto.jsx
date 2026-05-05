@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
 import { isVacioTrip, getSucursal } from "../utils.js";
-import { useSortable, SortTh, StatCard, SucBadge, Pager } from "../components/ui.jsx";
+import { useSortable, SortTh, StatCard, SucBadge, Pager, usePeriodo, PeriodoSelector } from "../components/ui.jsx";
 
 export default function EficienciaTracto({data,flota,today,T}){
-  const[months,setMonths]=useState(1);
+  const periodo = usePeriodo(data, "dashops_eficiencia");
   const[filtroMarca,setFiltroMarca]=useState("todas");
   const[filtroSuc,setFiltroSuc]=useState("todas");
   const[minKm,setMinKm]=useState(500);
@@ -16,10 +16,9 @@ export default function EficienciaTracto({data,flota,today,T}){
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
 
   const stats=useMemo(()=>{
-    const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
     const porTracto=new Map();
     for(const row of data){
-      if(!row._date||row._date<cutoff)continue;
+      if(!periodo.filterRow(row, today))continue;
       const pat=row.Tracto;
       if(!pat)continue;
       const km=Number(row.Kilometro)||0;
@@ -53,7 +52,7 @@ export default function EficienciaTracto({data,flota,today,T}){
       arr.push({...t,kmTotal,pctVacio,tramosTotal:t.tramosCom+t.tramosVac});
     }
     return arr;
-  },[data,flota,today,months,minKm]);
+  },[data,flota,today,periodo.filterRow,minKm]);
 
   const sucursales=useMemo(()=>[...new Set(stats.map(r=>r.ultimaSuc))].sort(),[stats]);
   const marcas=useMemo(()=>[...new Set(stats.map(r=>r.marca))].sort(),[stats]);
@@ -68,7 +67,7 @@ export default function EficienciaTracto({data,flota,today,T}){
   const {sorted,sortKey,sortDir,toggle}=useSortable(filtered,"pctVacio","desc");
   const totalP=Math.ceil(sorted.length/PP);
   const pd=sorted.slice((pg-1)*PP,pg*PP);
-  useEffect(()=>setPg(1),[filtroMarca,filtroSuc,months,minKm]);
+  useEffect(()=>setPg(1),[filtroMarca,filtroSuc,periodo.modo,periodo.mes,periodo.rolling,minKm]);
 
   const resumen=useMemo(()=>{
     const kmCom=filtered.reduce((s,r)=>s+r.kmCom,0);
@@ -86,11 +85,12 @@ export default function EficienciaTracto({data,flota,today,T}){
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
-      <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⚖️ Eficiencia por Tracto</h2>
+      <div style={{display:"flex",alignItems:"baseline",gap:"10px",flexWrap:"wrap"}}>
+        <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>⚖️ Eficiencia por Tracto</h2>
+        <span style={{fontSize:"11px",color:T.txM}}>Período: <strong style={{color:T.ac}}>{periodo.labelActual}</strong></span>
+      </div>
       <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
-        <select value={months} onChange={e=>setMonths(+e.target.value)} style={sel}>
-          <option value={1}>1 mes</option><option value={2}>2 meses</option><option value={3}>3 meses</option><option value={6}>6 meses</option>
-        </select>
+        <PeriodoSelector periodo={periodo} T={T}/>
         <select value={filtroMarca} onChange={e=>setFiltroMarca(e.target.value)} style={sel}>
           <option value="todas">Todas marcas</option>
           {marcas.map(m=><option key={m} value={m}>{m}</option>)}

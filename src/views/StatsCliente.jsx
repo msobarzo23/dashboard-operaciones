@@ -1,17 +1,15 @@
 import { useState, useMemo } from "react";
 import { isVacioTrip, SIN_SOLICITUD } from "../utils.js";
-import { useSortable, SortTh } from "../components/ui.jsx";
+import { useSortable, SortTh, usePeriodo, PeriodoSelector } from "../components/ui.jsx";
 
 export default function StatsCliente({data,today,T}){
-  const[months,setMonths]=useState(1);const[sortBy,setSortBy]=useState("km");
+  const periodo = usePeriodo(data, "dashops_cliente");
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
-  const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
   const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
 
   const {rawStats, vacioStats, totalKmConVacios} = useMemo(()=>{
-    const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
-    const allFiltered = months===99 ? data : data.filter(d=>d._date>=cutoff);
+    const allFiltered = data.filter(d => periodo.filterRow(d, today));
     const vacios = allFiltered.filter(d => isVacioTrip(d));
     const vacioKm = vacios.reduce((s, d) => s + (Number(d.Kilometro) || 0), 0);
     const vacioTramos = vacios.length;
@@ -24,16 +22,19 @@ export default function StatsCliente({data,today,T}){
     const clienteStats = Object.values(byC).map(c=>({...c,sols:c.sols.size,topCargas:Object.entries(c.cargas).sort((a,b)=>b[1]-a[1]).slice(0,3)}));
     const totalConVacios = clienteStats.reduce((s, c) => s + c.km, 0) + vacioKm;
     return {rawStats: clienteStats, vacioStats: {km: vacioKm, tramos: vacioTramos, topRutas: topRutasVacias}, totalKmConVacios: totalConVacios};
-  },[data,today,months]);
+  },[data,today,periodo.filterRow]);
 
-  const{sorted,sortKey,sortDir,toggle}=useSortable(rawStats,sortBy,"desc");
+  const{sorted,sortKey,sortDir,toggle}=useSortable(rawStats,"km","desc");
   const totalKmClientes=rawStats.reduce((s,c)=>s+c.km,0);
   const pctVacio = totalKmConVacios > 0 ? (vacioStats.km / totalKmConVacios * 100) : 0;
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
-      <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>🏢 Estadísticas por Cliente</h2>
-      <select value={months} onChange={e=>setMonths(+e.target.value)} style={sel}><option value={1}>1 mes</option><option value={2}>2 meses</option><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>1 año</option><option value={99}>Todo</option></select>
+      <div style={{display:"flex",alignItems:"baseline",gap:"10px",flexWrap:"wrap"}}>
+        <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>🏢 Estadísticas por Cliente</h2>
+        <span style={{fontSize:"11px",color:T.txM}}>Período: <strong style={{color:T.ac}}>{periodo.labelActual}</strong></span>
+      </div>
+      <PeriodoSelector periodo={periodo} T={T}/>
     </div>
     {vacioStats.tramos > 0 && (
       <div style={{background:T.isDark?"#1a1820":"#fefce8",border:`1px solid ${T.isDark?"#3d3520":"#fde68a"}`,borderLeft:`4px solid ${T.ac}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow}}>

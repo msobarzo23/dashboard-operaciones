@@ -1,30 +1,34 @@
 import { useState, useMemo } from "react";
 import { SIN_SOLICITUD, getSucursal } from "../utils.js";
-import { useSortable, SortTh, SucBadge } from "../components/ui.jsx";
+import { useSortable, SortTh, SucBadge, usePeriodo, PeriodoSelector } from "../components/ui.jsx";
 
 export default function StatsRuta({data,today,T}){
-  const[months,setMonths]=useState(1);const[minTrips,setMinTrips]=useState(5);
+  const periodo = usePeriodo(data, "dashops_ruta");
+  const[minTrips,setMinTrips]=useState(5);
   const card={background:T.sf,border:`1px solid ${T.bd}`,borderRadius:"12px",padding:"20px",marginBottom:"16px",boxShadow:T.cardShadow};
   const sel={background:T.inputBg,border:`1px solid ${T.inputBd}`,borderRadius:"8px",padding:"8px 12px",color:T.tx,fontSize:"12px",fontFamily:"inherit",outline:"none",cursor:"pointer"};
   const td={padding:"8px 12px",borderBottom:`1px solid ${T.bd}`,whiteSpace:"nowrap",color:T.tx,fontSize:"12px"};
   const thStyle={textAlign:"left",padding:"10px 12px",borderBottom:`2px solid ${T.bd}`,color:T.txM,fontWeight:600,textTransform:"uppercase",fontSize:"10px",letterSpacing:"1px",position:"sticky",top:0,background:T.sf};
 
   const rawStats=useMemo(()=>{
-    const cutoff=new Date(today);cutoff.setMonth(cutoff.getMonth()-months);
-    const filtered=(months===99?data:data.filter(d=>d._date>=cutoff))
+    const filtered=data
+      .filter(d => periodo.filterRow(d, today))
       .filter(d=>d.Cliente!==SIN_SOLICITUD);
     const byR={};
     filtered.forEach(d=>{const k=d.Origen+" → "+d.Destino;if(!byR[k])byR[k]={ruta:k,o:d.Origen,d:d.Destino,km:0,count:0,cls:new Set(),cargas:{}};byR[k].km+=Number(d.Kilometro)||0;byR[k].count++;byR[k].cls.add(d.Cliente);const cg=d.Carga?.trim();if(cg&&!/^\d+$/.test(cg))byR[k].cargas[cg]=(byR[k].cargas[cg]||0)+1;});
     return Object.values(byR).filter(r=>r.count>=minTrips).map(r=>({...r,avg:Math.round(r.km/r.count),cls:r.cls.size,topCarga:Object.entries(r.cargas).sort((a,b)=>b[1]-a[1])[0]?.[0]||"-"}));
-  },[data,today,months,minTrips]);
+  },[data,today,periodo.filterRow,minTrips]);
 
   const{sorted,sortKey,sortDir,toggle}=useSortable(rawStats,"count","desc");
 
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
-      <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>🛤️ Estadísticas por Ruta</h2>
-      <div style={{display:"flex",gap:"8px"}}>
-        <select value={months} onChange={e=>setMonths(+e.target.value)} style={sel}><option value={1}>1 mes</option><option value={2}>2 meses</option><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={99}>Todo</option></select>
+      <div style={{display:"flex",alignItems:"baseline",gap:"10px",flexWrap:"wrap"}}>
+        <h2 style={{margin:0,fontSize:"16px",color:T.tx}}>🛤️ Estadísticas por Ruta</h2>
+        <span style={{fontSize:"11px",color:T.txM}}>Período: <strong style={{color:T.ac}}>{periodo.labelActual}</strong></span>
+      </div>
+      <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+        <PeriodoSelector periodo={periodo} T={T}/>
         <select value={minTrips} onChange={e=>setMinTrips(+e.target.value)} style={sel}><option value={1}>Min.1</option><option value={5}>Min.5</option><option value={10}>Min.10</option><option value={20}>Min.20</option><option value={50}>Min.50</option></select>
       </div>
     </div>
